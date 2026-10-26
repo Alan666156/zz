@@ -64,7 +64,7 @@ test.describe('喂养记录（FEED）', () => {
 
   test('FEED-01 创建母乳记录（精确响应）', async ({ request }) => {
     const { client, baby } = await setupBaby(request);
-    const id = '8f14e45f-ceea-4e7a-9d7b-3c1e2f4a5b6c';
+    const id = uuid();
 
     const response = await client.post(
       '/feeding-records',

@@ -13,6 +13,11 @@ import { REDIS_KEY_PREFIX } from './env';
 export const SYNC_LOCK_TTL_MS = 15_000;
 export const SYNC_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 
+/** 设备缓存（30 min）：`{prefix}dev:{deviceHashHex}`，禁用后必须 DEL。 */
+export function deviceCacheKey(deviceHashHex: string): string {
+  return `${REDIS_KEY_PREFIX}dev:${deviceHashHex}`;
+}
+
 export function syncLockKey(deviceHashHex: string): string {
   return `${REDIS_KEY_PREFIX}lock:sync:${deviceHashHex}`;
 }

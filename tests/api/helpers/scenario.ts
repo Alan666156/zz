@@ -142,7 +142,9 @@ export async function seedStatsFixture(
   babyId: string,
 ): Promise<StatsFixture> {
   const ids = {
-    breastLeft: '8f14e45f-ceea-4e7a-9d7b-3c1e2f4a5b6c',
+    // 记录 id 是全局主键：每次调用都必须唯一，否则跨用例会命中其他设备
+    // 的同 id 记录（幂等创建返回 404），无法重复运行。
+    breastLeft: uuid(),
     breastRight: uuid(),
     formula120: uuid(),
     formula150: uuid(),

@@ -54,7 +54,7 @@ test.describe('生长记录（GROWTH）', () => {
 
   test('GROWTH-01 创建单指标记录', async ({ request }) => {
     const { client, baby } = await setupBaby(request);
-    const id = 'c2b3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e';
+    const id = uuid();
 
     const body = await expectOk<{ created: boolean; record: GrowthRecord }>(
       await client.post('/growth-records', {

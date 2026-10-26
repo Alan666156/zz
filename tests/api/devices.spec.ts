@@ -4,6 +4,8 @@ import { ApiClient, expectError, expectOk, newAnonymousClient } from './helpers/
 import { countDevicesByHash, execSql } from './helpers/db';
 import { deviceHashHex } from './helpers/device-hash';
 import { uuid } from './helpers/fixtures';
+import { redisDel } from './helpers/redis';
+import { deviceCacheKey } from './helpers/redis-keys';
 import { resetApiState, setupDevice, type Baby } from './helpers/scenario';
 
 /**
@@ -166,6 +168,9 @@ test.describe('设备（DEV）', () => {
       execSql(
         `UPDATE device SET status='DISABLED' WHERE device_uid_hash = UNHEX('${hash}')`,
       );
+      // 直接改库绕过了业务层的“禁用后 DEL”，必须手动失效设备缓存，
+      // 否则 30 分钟内仍会读到 ACTIVE（服务端缓存本身工作正常）。
+      redisDel(deviceCacheKey(hash));
 
       await expectError(await client.get('/babies'), 403, 'DEVICE_DISABLED');
       await expectError(
@@ -177,6 +182,7 @@ test.describe('设备（DEV）', () => {
       execSql(
         `UPDATE device SET status='ACTIVE' WHERE device_uid_hash = UNHEX('${hash}')`,
       );
+      redisDel(deviceCacheKey(hash));
     }
 
     const restored = await expectOk<Baby[]>(await client.get('/babies'));

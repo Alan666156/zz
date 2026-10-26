@@ -124,7 +124,7 @@ test.describe('CSV 导出（EXP）', () => {
     expect(firstRows.some((row) => row[0] === fixture.ids.deletedFormula500)).toBe(false);
 
     expect(firstRows[1]).toEqual([
-      '8f14e45f-ceea-4e7a-9d7b-3c1e2f4a5b6c',
+      fixture.ids.breastLeft,
       '小满',
       '母乳',
       '2026-10-20T08:00:00+08:00',

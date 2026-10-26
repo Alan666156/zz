@@ -49,16 +49,17 @@ test.describe('时区与本地日期（TZ）', () => {
   test('TZ-02 同一 UTC 时刻、不同偏移 → 不同本地日期', async ({ request }) => {
     const { client, baby } = await setupBaby(request);
 
+    // 同一 UTC 时刻 2026-10-25T17:00:00Z；必须早于“当前时间 +5 分钟”。
     const shanghai = await createFeeding(client, baby.id, {
-      startedAt: '2026-10-27T01:00:00+08:00',
+      startedAt: '2026-10-26T01:00:00+08:00',
     });
     const utc = await createFeeding(client, baby.id, {
-      startedAt: '2026-10-26T17:00:00+00:00',
+      startedAt: '2026-10-25T17:00:00+00:00',
     });
 
-    expect(shanghai.recordDate).toBe('2026-10-27');
+    expect(shanghai.recordDate).toBe('2026-10-26');
     expect(shanghai.tzOffsetMinutes).toBe(480);
-    expect(utc.recordDate).toBe('2026-10-26');
+    expect(utc.recordDate).toBe('2026-10-25');
     expect(utc.tzOffsetMinutes).toBe(0);
 
     const shanghaiRow = queryOne(
@@ -100,41 +101,56 @@ test.describe('时区与本地日期（TZ）', () => {
   });
 
   test('TZ-05 统计按本地日期分组（跨月/跨年）', async ({ request }) => {
-    const { client, baby } = await setupBaby(request);
+    const { client, baby } = await setupBaby(request, { birthDate: '2025-01-01' });
 
+    // 跨年边界：2025-12-31 23:59:59 +08 与 2026-01-01 00:30 +08。
     await createFeeding(client, baby.id, {
-      startedAt: '2026-10-20T23:59:59+08:00',
+      startedAt: '2025-12-31T23:59:59+08:00',
       amountValue: 120,
     });
     await createFeeding(client, baby.id, {
-      startedAt: '2026-12-31T23:30:00+08:00',
+      startedAt: '2026-01-01T00:30:00+08:00',
       amountValue: 100,
     });
+    // 跨月边界：2026-09-30 23:30 +08 与 2026-10-01 00:15 +08。
+    await createFeeding(client, baby.id, {
+      startedAt: '2026-09-30T23:30:00+08:00',
+      amountValue: 90,
+    });
+    await createFeeding(client, baby.id, {
+      startedAt: '2026-10-01T00:15:00+08:00',
+      amountValue: 80,
+    });
 
-    const october = await expectOk<{
-      feedingCount: number;
-      totalAmountMl: number;
-    }>(await client.get(`/stats/daily?babyId=${baby.id}&date=2026-10-20`));
-    expect(october.data.feedingCount).toBe(1);
-    expect(october.data.totalAmountMl).toBe(120.0);
-
-    const nextDay = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
-      await client.get(`/stats/daily?babyId=${baby.id}&date=2026-10-21`),
+    const yearEve = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
+      await client.get(`/stats/daily?babyId=${baby.id}&date=2025-12-31`),
     );
-    expect(nextDay.data.feedingCount).toBe(0);
-    expect(nextDay.data.totalAmountMl).toBe(0.0);
-
-    const newYearEve = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
-      await client.get(`/stats/daily?babyId=${baby.id}&date=2026-12-31`),
-    );
-    expect(newYearEve.data.feedingCount).toBe(1);
-    expect(newYearEve.data.totalAmountMl).toBe(100.0);
+    expect(yearEve.data.feedingCount).toBe(1);
+    expect(yearEve.data.totalAmountMl).toBe(120.0);
 
     const newYear = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
-      await client.get(`/stats/daily?babyId=${baby.id}&date=2027-01-01`),
+      await client.get(`/stats/daily?babyId=${baby.id}&date=2026-01-01`),
     );
-    expect(newYear.data.feedingCount).toBe(0);
-    expect(newYear.data.totalAmountMl).toBe(0.0);
+    expect(newYear.data.feedingCount).toBe(1);
+    expect(newYear.data.totalAmountMl).toBe(100.0);
+
+    const emptyDay = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
+      await client.get(`/stats/daily?babyId=${baby.id}&date=2026-01-02`),
+    );
+    expect(emptyDay.data.feedingCount).toBe(0);
+    expect(emptyDay.data.totalAmountMl).toBe(0.0);
+
+    const monthEnd = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
+      await client.get(`/stats/daily?babyId=${baby.id}&date=2026-09-30`),
+    );
+    expect(monthEnd.data.feedingCount).toBe(1);
+    expect(monthEnd.data.totalAmountMl).toBe(90.0);
+
+    const monthStart = await expectOk<{ feedingCount: number; totalAmountMl: number }>(
+      await client.get(`/stats/daily?babyId=${baby.id}&date=2026-10-01`),
+    );
+    expect(monthStart.data.feedingCount).toBe(1);
+    expect(monthStart.data.totalAmountMl).toBe(80.0);
   });
 
   test('TZ-06 recordDate 由服务端计算，忽略客户端伪造字段', async ({ request }) => {

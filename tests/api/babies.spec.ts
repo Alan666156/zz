@@ -16,9 +16,9 @@ import {
   type CreateBabyData,
 } from './helpers/scenario';
 
-const B1_ID = 'b1a2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
-const B1_BODY = {
-  id: B1_ID,
+// baby.id 是全局主键，跨用例/跨轮次复用固定 UUID 会命中其他设备的
+// 已存在记录（Q-05 返回 404）。每个用例在用例内生成唯一 id。
+const BABY_BODY = {
   name: '小满',
   gender: 'FEMALE' as const,
   birthDate: '2026-03-01',
@@ -36,13 +36,14 @@ test.describe('宝宝档案（BABY）', () => {
 
   test('BABY-01 创建第一个宝宝自动成为默认', async ({ request }) => {
     const { client } = await setupDevice(request);
+    const id = uuid();
 
-    const response = await client.post('/babies', B1_BODY);
+    const response = await client.post('/babies', { id, ...BABY_BODY });
     const body = await expectOk<CreateBabyData>(response);
     const baby = body.data.baby;
 
     expect(body.data.created).toBe(true);
-    expect(baby.id).toBe(B1_ID);
+    expect(baby.id).toBe(id);
     expect(baby.name).toBe('小满');
     expect(baby.gender).toBe('FEMALE');
     expect(baby.birthDate).toBe('2026-03-01');
@@ -97,10 +98,11 @@ test.describe('宝宝档案（BABY）', () => {
 
   test('BABY-03 相同 id 重复创建幂等', async ({ request }) => {
     const { client } = await setupDevice(request);
-    await createBaby(client, B1_BODY);
+    const id = uuid();
+    await createBaby(client, { id, ...BABY_BODY });
 
     const second = await expectOk<CreateBabyData>(
-      await client.post('/babies', { ...B1_BODY, name: '小满满' }),
+      await client.post('/babies', { id, ...BABY_BODY, name: '小满满' }),
     );
     expect(second.data.created).toBe(false);
     expect(second.data.baby.name).toBe('小满');
@@ -257,7 +259,7 @@ test.describe('宝宝档案（BABY）', () => {
 
   test('BABY-09 读取单个宝宝与跨设备 404', async ({ request }) => {
     const d1 = await setupDevice(request);
-    const b1 = await createBaby(d1.client, B1_BODY);
+    const b1 = await createBaby(d1.client);
     const d2 = await setupDevice(request);
 
     const own = await expectOk<Baby>(await d1.client.get(`/babies/${b1.id}`));
@@ -273,7 +275,7 @@ test.describe('宝宝档案（BABY）', () => {
   });
 
   test('BABY-10 PATCH 部分更新与 revision 递增', async ({ request }) => {
-    const { client, baby } = await setupBaby(request, B1_BODY);
+    const { client, baby } = await setupBaby(request);
 
     const patched = await expectOk<Baby>(
       await client.patch(`/babies/${baby.id}`, { baseRevision: 1, name: '小满满' }),
@@ -299,7 +301,7 @@ test.describe('宝宝档案（BABY）', () => {
   });
 
   test('BABY-11 PATCH baseRevision 冲突', async ({ request }) => {
-    const { client, baby } = await setupBaby(request, B1_BODY);
+    const { client, baby } = await setupBaby(request);
 
     await expectOk<Baby>(
       await client.patch(`/babies/${baby.id}`, { baseRevision: 1, name: '小满满' }),
@@ -320,7 +322,7 @@ test.describe('宝宝档案（BABY）', () => {
   });
 
   test('BABY-12 试图取消唯一默认宝宝', async ({ request }) => {
-    const { client, baby } = await setupBaby(request, B1_BODY);
+    const { client, baby } = await setupBaby(request);
 
     await expectError(
       await client.patch(`/babies/${baby.id}`, { baseRevision: 1, isDefault: false }),
@@ -334,7 +336,7 @@ test.describe('宝宝档案（BABY）', () => {
   });
 
   test('BABY-13 缺少 baseRevision 或类型非法', async ({ request }) => {
-    const { client, baby } = await setupBaby(request, B1_BODY);
+    const { client, baby } = await setupBaby(request);
 
     const missing = await client.patch(`/babies/${baby.id}`, { name: '无版本' });
     const missingBody = await expectError(missing, 400, 'VALIDATION_ERROR');
@@ -357,7 +359,7 @@ test.describe('宝宝档案（BABY）', () => {
   });
 
   test('BABY-14 删除宝宝级联软删除', async ({ request }) => {
-    const { client, baby } = await setupBaby(request, B1_BODY);
+    const { client, baby } = await setupBaby(request);
     const feeding1 = await createFeeding(client, baby.id, {
       startedAt: '2026-10-20T08:00:00+08:00',
     });
@@ -424,7 +426,7 @@ test.describe('宝宝档案（BABY）', () => {
 
   test('BABY-15 删除幂等与默认宝宝重新指派', async ({ request }) => {
     const { client } = await setupDevice(request);
-    const b1 = await createBaby(client, B1_BODY);
+    const b1 = await createBaby(client);
     const b2 = await createBaby(client, { name: 'B2', isDefault: false });
 
     const first = await expectOk<{ alreadyDeleted: boolean; deletedAt: string }>(
@@ -443,7 +445,7 @@ test.describe('宝宝档案（BABY）', () => {
     expect(second.data.deletedAt).toBe(first.data.deletedAt);
 
     await expectError(
-      await client.post('/babies', { ...B1_BODY, name: '复活尝试' }),
+      await client.post('/babies', { id: b1.id, ...BABY_BODY, name: '复活尝试' }),
       404,
       'NOT_FOUND',
     );
@@ -456,7 +458,7 @@ test.describe('宝宝档案（BABY）', () => {
 
   test('BABY-16 跨设备修改/删除 404', async ({ request }) => {
     const d1 = await setupDevice(request);
-    const b1 = await createBaby(d1.client, B1_BODY);
+    const b1 = await createBaby(d1.client);
     const d2 = await setupDevice(request);
 
     await expectError(
