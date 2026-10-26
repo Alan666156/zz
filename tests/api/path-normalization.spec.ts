@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import { ApiClient, expectError, expectOk } from './helpers/api-client';
+import { downloadCsv } from './helpers/csv';
 import {
   RATE_LIMIT_EXPORT_PER_HOUR,
   RATE_LIMIT_INIT_PER_HOUR,
@@ -12,7 +13,7 @@ import { resetApiState, setupBaby } from './helpers/scenario';
 
 /**
  * 契约：docs/architecture/v1.0-contract-addendum.md §9（Q-26 / N-7）
- * 用例：docs/tests/v1.0.md §14（RL-07..RL-10）
+ * 用例：docs/tests/v1.0.md §14（RL-07..RL-11）
  * 状态：已写好；N-7 合入并重启后置 RUN_PATH_NORMALIZATION=1 执行。
  *
  * 说明：这些用例要求后端按规范化路由判定 init/export/sync 作用域，
@@ -26,7 +27,7 @@ test.describe('路径规范化与端点作用域限流（Q-26）', () => {
 
   const pending = '等待 backend-dev N-7（规范化路由限流）合入并重启，置 RUN_PATH_NORMALIZATION=1 后执行';
 
-  test('Q26-01 sync 矩阵参数与查询串共享分钟额度', async ({ request }) => {
+  test('RL-07 sync 矩阵参数与查询串共享分钟额度', async ({ request }) => {
     test.skip(!RUN_PATH_NORMALIZATION, pending);
     const limit = RATE_LIMIT_SYNC_PER_MINUTE;
     const { client, baby } = await setupBaby(request);
@@ -75,7 +76,7 @@ test.describe('路径规范化与端点作用域限流（Q-26）', () => {
     await expectError(query, 429, 'RATE_LIMITED');
   });
 
-  test('Q26-02 export 矩阵参数路径不得绕过导出额度', async ({ request }) => {
+  test('RL-08 export 矩阵参数路径不得绕过导出额度', async ({ request }) => {
     test.skip(!RUN_PATH_NORMALIZATION, pending);
     const limit = RATE_LIMIT_EXPORT_PER_HOUR;
     const { client, baby } = await setupBaby(request);
@@ -100,7 +101,7 @@ test.describe('路径规范化与端点作用域限流（Q-26）', () => {
     expect(error.data).not.toHaveProperty('downloadUrl');
   });
 
-  test('Q26-03 init 矩阵参数路径共享 IP 小时额度', async ({ request }) => {
+  test('RL-09 init 矩阵参数路径共享 IP 小时额度', async ({ request }) => {
     test.skip(!RUN_PATH_NORMALIZATION, pending);
     const limit = RATE_LIMIT_INIT_PER_HOUR;
 
@@ -126,10 +127,31 @@ test.describe('路径规范化与端点作用域限流（Q-26）', () => {
     await expectError(blocked, 429, 'RATE_LIMITED');
   });
 
-  test('Q26-04 受保护端点加矩阵参数后仍要求设备头', async ({ request }) => {
+  test('RL-10 受保护端点加矩阵参数后仍要求设备头', async ({ request }) => {
     test.skip(!RUN_PATH_NORMALIZATION, pending);
     const client = new ApiClient(request, uuid());
     const response = await client.get('/babies;x=1', { omitDeviceHeader: true });
-    await expectError(response, 409, 'DEVICE_NOT_REGISTERED');
+    // 无设备头是 DEVICE_ID_REQUIRED(400)，不是“已注册但不可见”的 409。
+    await expectError(response, 400, 'DEVICE_ID_REQUIRED');
+  });
+
+  test('RL-11 health 与 CSV 下载豁免在矩阵参数下保持精确', async ({ request }) => {
+    test.skip(!RUN_PATH_NORMALIZATION, pending);
+    // 豁免仍然只覆盖 health 与 CSV 下载本身，不因路径变体扩大到受保护端点。
+    const anonymous = new ApiClient(request, null);
+    const health = await anonymous.get('/health;x=1');
+    expect(health.status()).toBe(200);
+
+    const { client, baby } = await setupBaby(request);
+    const ticket = await expectOk<{ downloadUrl: string }>(
+      await client.post('/exports/feeding-records', {
+        babyId: baby.id,
+        from: '2026-10-20',
+        to: '2026-10-20',
+      }),
+    );
+    const download = await downloadCsv(request, `${ticket.data.downloadUrl};x=1`);
+    expect(download.status).toBe(200);
+    expect(download.bytes[0]).toBe(0xef);
   });
 });

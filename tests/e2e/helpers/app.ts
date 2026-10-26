@@ -191,6 +191,10 @@ export class E2eApi {
     return data.baby;
   }
 
+  patchBaby(id: string, data: Record<string, unknown>): Promise<BabyDto> {
+    return this.ok<BabyDto>('PATCH', `/babies/${id}`, data);
+  }
+
   listFeedings(babyId: string, date: string): Promise<PageDto<FeedingDto>> {
     const query = new URLSearchParams({ babyId, date, page: '1', size: '100' });
     return this.ok('GET', `/feeding-records?${query.toString()}`);
