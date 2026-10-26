@@ -1,0 +1,527 @@
+import { defineStore } from 'pinia'
+import { ApiError, isRetryableApiError } from '@/api/client'
+import {
+  createBabyRequest,
+  deleteBabyRequest,
+  fetchBabies,
+  patchBabyRequest,
+} from '@/api/babies'
+import {
+  deleteBabyCache,
+  deleteFeedingRecordsByBaby,
+  deleteGrowthRecordsByBaby,
+  getBabiesCache,
+  putBabiesCache,
+  replaceBabiesCache,
+} from '@/db'
+import {
+  enqueueOutbox,
+  outboxKey,
+  pendingOutboxOps,
+  removeOutbox,
+  removeOutboxByBaby,
+} from '@/db/outbox'
+import { MAX_BABIES, type Baby, type BabyInput } from '@/types/models'
+import { getStorageItem, removeStorageItem, setStorageItem } from '@/utils/storage'
+import { requestSync } from '@/utils/sync-events'
+import { uuidV4 } from '@/utils/uuid'
+import { validateBabyName, validateBirthDate } from '@/utils/validation'
+
+/** Q-15 固定 key */
+export const ACTIVE_BABY_KEY = 'zz.bf.activeBabyId'
+const LEGACY_ACTIVE_BABY_KEY = 'zz.activeBabyId'
+
+/** 迁移旧版 key，避免升级后忘记当前宝宝 */
+function readStoredActiveBabyId(): string | null {
+  const current = getStorageItem(ACTIVE_BABY_KEY)
+  if (current) {
+    removeStorageItem(LEGACY_ACTIVE_BABY_KEY)
+    return current
+  }
+  const legacy = getStorageItem(LEGACY_ACTIVE_BABY_KEY)
+  if (legacy) {
+    setStorageItem(ACTIVE_BABY_KEY, legacy)
+    removeStorageItem(LEGACY_ACTIVE_BABY_KEY)
+    return legacy
+  }
+  return null
+}
+
+function cloneBabies(list: Baby[]): Baby[] {
+  return list.map((baby) => ({ ...baby }))
+}
+
+function sortBabies(list: Baby[]): Baby[] {
+  return list
+    .filter((baby) => !baby.deletedAt)
+    .sort((a, b) => {
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
+      return a.createdAt.localeCompare(b.createdAt)
+    })
+}
+
+function toSyncData(baby: Baby): Record<string, unknown> {
+  return {
+    name: baby.name,
+    gender: baby.gender,
+    birthDate: baby.birthDate,
+    isDefault: baby.isDefault,
+  }
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+export const useBabyStore = defineStore('baby', {
+  state: () => ({
+    babies: [] as Baby[],
+    activeBabyId: readStoredActiveBabyId(),
+    loaded: false,
+    loading: false,
+    refreshing: false,
+    lastError: null as string | null,
+    /** 本机缓存写入失败：数据仅保留在 Pinia，刷新后可能丢失（FE-08） */
+    cacheDegraded: false,
+  }),
+
+  getters: {
+    activeBaby(state): Baby | undefined {
+      return (
+        state.babies.find((baby) => baby.id === state.activeBabyId) ??
+        state.babies.find((baby) => baby.isDefault) ??
+        state.babies[0]
+      )
+    },
+    canAddMore(state): boolean {
+      return state.babies.length < MAX_BABIES
+    },
+  },
+
+  actions: {
+    ensureActive(): void {
+      const stored = getStorageItem(ACTIVE_BABY_KEY)
+      const matched = this.babies.find((baby) => baby.id === stored)
+      if (matched) {
+        this.activeBabyId = matched.id
+        return
+      }
+      const preferred = this.babies.find((baby) => baby.isDefault) ?? this.babies[0]
+      if (preferred) {
+        this.activeBabyId = preferred.id
+        setStorageItem(ACTIVE_BABY_KEY, preferred.id)
+      } else {
+        this.activeBabyId = null
+        removeStorageItem(ACTIVE_BABY_KEY)
+      }
+    },
+
+    setActiveBaby(id: string): void {
+      if (!this.babies.some((baby) => baby.id === id)) return
+      this.activeBabyId = id
+      setStorageItem(ACTIVE_BABY_KEY, id)
+    },
+
+    setList(list: Baby[]): void {
+      this.babies = sortBabies(list)
+      this.ensureActive()
+    },
+
+    /** 缓存写失败不再向外抛（会打断已成功的在线操作），但必须显式标记（FE-08） */
+    async persistBabiesCache(): Promise<void> {
+      try {
+        await putBabiesCache(this.babies)
+        this.cacheDegraded = false
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机缓存写入失败，数据仅在当前页面保留'
+      }
+    },
+
+    upsertLocal(baby: Baby): void {
+      const next = this.babies.filter((item) => item.id !== baby.id)
+      next.push({ ...baby })
+      this.babies = sortBabies(
+        baby.isDefault
+          ? next.map((item) =>
+              item.id === baby.id ? { ...item, isDefault: true } : { ...item, isDefault: false },
+            )
+          : next,
+      )
+      this.ensureActive()
+    },
+
+    /**
+     * 缓存优先加载：先读 IndexedDB 立即渲染，再后台拉服务端。
+     * 本地无缓存时等待一次服务端请求（首次安装/清缓存场景）。
+     */
+    async load(force = false): Promise<void> {
+      if (this.loading) return
+      if (this.loaded && !force) {
+        this.ensureActive()
+        return
+      }
+      this.loading = true
+      try {
+        const cached = (await getBabiesCache()).filter((baby) => !baby.deletedAt)
+        if (cached.length) {
+          this.setList(cached)
+        }
+      } catch {
+        // IndexedDB 不可用时继续走网络
+      }
+      this.loading = false
+      this.loaded = true
+      this.ensureActive()
+
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+      if (this.babies.length === 0 && !offline) {
+        await this.refreshFromServer()
+      } else {
+        void this.refreshFromServer()
+      }
+    },
+
+    async refreshFromServer(): Promise<void> {
+      if (this.refreshing) return
+      this.refreshing = true
+      try {
+        const fetched = await fetchBabies()
+        // 以 outbox 未完成项为准：pending 编辑用本地值，pending DELETE 不得被服务端复活
+        const pendingOps = await pendingOutboxOps('BABY').catch(
+          () => new Map<string, 'UPSERT' | 'DELETE'>(),
+        )
+        const localById = new Map(this.babies.map((local) => [local.id, local]))
+        const serverBabies = fetched
+          .filter((server) => pendingOps.get(server.id) !== 'DELETE')
+          .map((server) =>
+            pendingOps.has(server.id) ? localById.get(server.id) ?? server : server,
+          )
+        const serverIds = new Set(serverBabies.map((server) => server.id))
+        // 保留未同步成功的本地宝宝（revision=0 或 outbox 仍有未完成项）
+        const pendingLocal = this.babies.filter(
+          (local) =>
+            !serverIds.has(local.id) &&
+            ((pendingOps.has(local.id) && pendingOps.get(local.id) !== 'DELETE') ||
+              local.revision === 0),
+        )
+        const merged = [...serverBabies, ...pendingLocal]
+        this.setList(merged)
+        await replaceBabiesCache(merged)
+        this.lastError = null
+      } catch (error) {
+        this.lastError = errorMessage(error, '宝宝列表加载失败')
+      } finally {
+        this.refreshing = false
+      }
+    },
+
+    async createBaby(input: BabyInput): Promise<Baby> {
+      if (this.babies.length >= MAX_BABIES) {
+        throw new Error(`最多只能添加 ${MAX_BABIES} 个宝宝`)
+      }
+      const nameError = validateBabyName(input.name)
+      if (nameError) throw new Error(nameError)
+      const birthError = validateBirthDate(input.birthDate)
+      if (birthError) throw new Error(birthError)
+
+      const now = new Date().toISOString()
+      const localBaby: Baby = {
+        id: input.id ?? uuidV4(),
+        name: input.name.trim(),
+        gender: input.gender ?? 'UNKNOWN',
+        birthDate: input.birthDate,
+        isDefault: this.babies.length === 0 || input.isDefault === true,
+        revision: 0,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      }
+
+      const snapshot = cloneBabies(this.babies)
+      this.upsertLocal(localBaby)
+      await this.persistBabiesCache()
+
+      try {
+        const result = await createBabyRequest({
+          id: localBaby.id,
+          name: localBaby.name,
+          gender: localBaby.gender,
+          birthDate: localBaby.birthDate,
+          isDefault: localBaby.isDefault,
+        })
+        this.upsertLocal(result.baby)
+        await removeOutbox(outboxKey('BABY', localBaby.id))
+        this.lastError = null
+        await this.persistBabiesCache()
+        return result.baby
+      } catch (error) {
+        if (!isRetryableApiError(error)) {
+          this.babies = snapshot
+          this.ensureActive()
+          await replaceBabiesCache(snapshot)
+          throw error
+        }
+        await enqueueOutbox({
+          entityType: 'BABY',
+          entityId: localBaby.id,
+          op: 'UPSERT',
+          baseRevision: 0,
+          data: toSyncData(localBaby),
+        })
+        this.lastError = errorMessage(error, '网络异常，宝宝已保存到本机')
+        requestSync()
+        return localBaby
+      }
+    },
+
+    async updateBaby(id: string, patch: Partial<BabyInput>): Promise<Baby> {
+      const current = this.babies.find((baby) => baby.id === id)
+      if (!current) throw new Error('宝宝不存在')
+
+      if (patch.name !== undefined) {
+        const nameError = validateBabyName(patch.name)
+        if (nameError) throw new Error(nameError)
+      }
+      if (patch.birthDate !== undefined) {
+        const birthError = validateBirthDate(patch.birthDate)
+        if (birthError) throw new Error(birthError)
+      }
+
+      const updated: Baby = {
+        ...current,
+        name: patch.name !== undefined ? patch.name.trim() : current.name,
+        gender: patch.gender ?? current.gender,
+        birthDate: patch.birthDate ?? current.birthDate,
+        isDefault: patch.isDefault ?? current.isDefault,
+        updatedAt: new Date().toISOString(),
+      }
+
+      const snapshot = cloneBabies(this.babies)
+      this.upsertLocal(updated)
+      await this.persistBabiesCache()
+
+      // 从未同步成功的宝宝：继续以 baseRevision=0 折叠在 outbox 中
+      if (current.revision === 0) {
+        await enqueueOutbox({
+          entityType: 'BABY',
+          entityId: id,
+          op: 'UPSERT',
+          baseRevision: 0,
+          data: toSyncData(updated),
+        })
+        return updated
+      }
+
+      try {
+        const payload: Record<string, unknown> = { baseRevision: current.revision }
+        if (patch.name !== undefined) payload.name = updated.name
+        if (patch.gender !== undefined) payload.gender = updated.gender
+        if (patch.birthDate !== undefined) payload.birthDate = updated.birthDate
+        if (patch.isDefault !== undefined) payload.isDefault = updated.isDefault
+        const serverBaby = await patchBabyRequest(id, payload)
+        this.upsertLocal(serverBaby)
+        await removeOutbox(outboxKey('BABY', id))
+        this.lastError = null
+        await this.persistBabiesCache()
+        // 设为默认时服务端会同时递增旧默认宝宝的 revision，本地只有被 PATCH 的那条是新的；
+        // 不重新拉取会导致之后编辑旧默认宝宝 409（FE-06）。
+        if (patch.isDefault === true) await this.refreshFromServer()
+        return this.babies.find((baby) => baby.id === id) ?? serverBaby
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          // 在线 PATCH 已删除宝宝 → 404，从本机移除（契约 Q-06）
+          await this.applySyncedBabyDeletion(id)
+          throw new Error('宝宝已不存在，已从本机移除')
+        }
+        if (!isRetryableApiError(error)) {
+          this.babies = snapshot
+          this.ensureActive()
+          await replaceBabiesCache(snapshot)
+          throw error
+        }
+        await enqueueOutbox({
+          entityType: 'BABY',
+          entityId: id,
+          op: 'UPSERT',
+          baseRevision: current.revision,
+          data: toSyncData(updated),
+        })
+        this.lastError = errorMessage(error, '网络异常，修改已保存到本机')
+        requestSync()
+        return updated
+      }
+    },
+
+    async setDefault(id: string): Promise<Baby> {
+      return this.updateBaby(id, { isDefault: true })
+    },
+
+    /**
+     * 记录缓存与记录级 outbox 只能在宝宝删除不可逆确认后清理（N-1）。
+     * 单步本地存储失败不阻断删除，但必须显式降级（N-2）。
+     */
+    async purgeBabyLocalData(id: string): Promise<void> {
+      try {
+        await deleteBabyCache(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await deleteFeedingRecordsByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await deleteGrowthRecordsByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await removeOutboxByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机同步状态更新失败，稍后会自动重试'
+      }
+    },
+
+    async discardOutboxKey(key: string): Promise<void> {
+      try {
+        await removeOutbox(key)
+      } catch {
+        this.cacheDegraded = true
+      }
+    },
+
+    async removeBaby(id: string): Promise<void> {
+      const current = this.babies.find((baby) => baby.id === id)
+      if (!current) return
+      const snapshot = cloneBabies(this.babies)
+
+      this.babies = this.babies.filter((baby) => baby.id !== id)
+      if (current.isDefault) {
+        const remaining = [...this.babies].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        const nextDefaultId = remaining[0]?.id
+        if (nextDefaultId) {
+          this.babies = this.babies.map((baby) =>
+            baby.id === nextDefaultId ? { ...baby, isDefault: true } : { ...baby, isDefault: false },
+          )
+        }
+      }
+      this.ensureActive()
+      try {
+        await replaceBabiesCache(this.babies)
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机缓存写入失败，数据仅在当前页面保留'
+      }
+
+      const key = outboxKey('BABY', id)
+      // 本地新建尚未同步：宝宝及其记录都不可能到达服务端，删除是最终状态
+      if (current.revision === 0) {
+        await this.discardOutboxKey(key)
+        await this.purgeBabyLocalData(id)
+        return
+      }
+
+      try {
+        await deleteBabyRequest(id, current.revision)
+        // 在线 DELETE 已确认（2xx）：此时记录/outbox 的清理不可逆
+        await this.discardOutboxKey(key)
+        await this.purgeBabyLocalData(id)
+        this.lastError = null
+        // 删除默认宝宝时服务端会提升另一个宝宝并递增其 revision，重新拉取对齐（FE-06）
+        if (current.isDefault) await this.refreshFromServer()
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          // 服务端已不存在，视同删除成功
+          await this.discardOutboxKey(key)
+          await this.purgeBabyLocalData(id)
+          return
+        }
+        if (!isRetryableApiError(error)) {
+          // 409 CONFLICT / 其他 4xx：宝宝恢复，记录缓存与 outbox 必须原样保留（N-1）
+          this.babies = snapshot
+          this.ensureActive()
+          try {
+            await replaceBabiesCache(snapshot)
+          } catch {
+            this.cacheDegraded = true
+            this.lastError = '本机缓存写入失败，数据仅在当前页面保留'
+          }
+          throw error
+        }
+        try {
+          await enqueueOutbox({
+            entityType: 'BABY',
+            entityId: id,
+            op: 'DELETE',
+            baseRevision: current.revision,
+          })
+        } catch {
+          // 删除没有进入队列就不能假装成功，恢复宝宝并保留记录
+          this.babies = snapshot
+          this.ensureActive()
+          try {
+            await replaceBabiesCache(snapshot)
+          } catch {
+            this.cacheDegraded = true
+          }
+          throw new Error('删除失败，请检查浏览器存储空间后重试')
+        }
+        // 挂起的 BABY DELETE 会阻止该宝宝名下记录参与推送（待删除确认后再清理）
+        this.lastError = errorMessage(error, '网络异常，删除将在联网后同步')
+        requestSync()
+      }
+    },
+
+    /** sync 结果覆盖本地宝宝（APPLIED / DUPLICATE / CONFLICT_SERVER_WINS） */
+    async applySyncedBaby(baby: Baby): Promise<void> {
+      if (baby.deletedAt) {
+        await this.applySyncedBabyDeletion(baby.id)
+        return
+      }
+      this.upsertLocal(baby)
+      try {
+        await putBabiesCache(this.babies)
+        this.cacheDegraded = false
+      } catch {
+        // 缓存失败不影响 Pinia，但必须显式标记（FE-08）
+        this.cacheDegraded = true
+      }
+      // 服务端设默认时会递增旧默认宝宝的 revision；异步全量对齐，避免之后编辑旧默认宝宝 409（FE-06）
+      if (baby.isDefault) void this.refreshFromServer()
+    },
+
+    /** sync tombstone：宝宝及其记录一并从本地清除，绝不复活 */
+    async applySyncedBabyDeletion(id: string): Promise<void> {
+      this.babies = this.babies.filter((baby) => baby.id !== id)
+      this.ensureActive()
+      try {
+        await deleteBabyCache(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await deleteFeedingRecordsByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await deleteGrowthRecordsByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await removeOutboxByBaby(id)
+      } catch {
+        this.lastError = '本机同步状态更新失败，稍后会自动重试'
+      }
+      try {
+        await replaceBabiesCache(this.babies)
+      } catch {
+        this.cacheDegraded = true
+      }
+    },
+  },
+})

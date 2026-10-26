@@ -1,0 +1,22 @@
+{
+  "name": "zz-baby-feeding-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Baby feeding app V1.0 API contract and E2E acceptance tests (TE-01b skeleton)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:e2e": "playwright test --project=e2e",
+    "test:rate-limit": "playwright test --project=api api/rate-limit.spec.ts",
+    "list": "playwright test --list",
+    "typecheck": "tsc --noEmit",
+    "reset:env": "bash scripts/reset-e2e.sh",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0"
+  }
+}
