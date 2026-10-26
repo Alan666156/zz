@@ -86,9 +86,11 @@ public final class BabyValidator {
         if (baseRevision == null) {
             throw ValidationExceptions.field("baseRevision", "baseRevision 必填");
         }
-        if (baseRevision < 1) {
-            throw ValidationExceptions.field("baseRevision", "baseRevision 必须大于 0");
+        if (baseRevision < 0) {
+            throw ValidationExceptions.field("baseRevision", "baseRevision 不能为负数");
         }
+        // 0 is syntactically valid: it can never match an existing revision and
+        // therefore resolves to 409 CONFLICT on PATCH/DELETE (BABY-13).
     }
 
     public static BusinessException notFound() {

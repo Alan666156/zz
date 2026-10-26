@@ -1,6 +1,8 @@
 package com.zz.babyfeeding.device;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.zz.babyfeeding.common.api.BusinessException;
+import com.zz.babyfeeding.common.api.ErrorCode;
 import com.zz.babyfeeding.common.api.ValidationExceptions;
 import com.zz.babyfeeding.common.security.DeviceIdHasher;
 import com.zz.babyfeeding.common.util.TimeUtils;
@@ -20,6 +22,7 @@ import java.time.LocalDateTime;
 public class DeviceService {
 
     private static final String DEFAULT_PLATFORM = "H5";
+    private static final String STATUS_ACTIVE = "ACTIVE";
     private static final int MAX_APP_VERSION_LENGTH = 32;
 
     private final DeviceMapper deviceMapper;
@@ -58,7 +61,7 @@ public class DeviceService {
         entity.setDeviceUidHash(hash);
         entity.setPlatform(resolvedPlatform);
         entity.setAppVersion(appVersion);
-        entity.setStatus("ACTIVE");
+        entity.setStatus(STATUS_ACTIVE);
         entity.setFirstSeenAt(now);
         entity.setLastSeenAt(now);
         entity.setCreatedAt(now);
@@ -80,6 +83,12 @@ public class DeviceService {
 
     private InitResult refresh(DeviceEntity existing, String platform, String appVersion,
                                String hashHex) {
+        // A disabled device must not be able to re-initialise itself: init is
+        // the entry point that would otherwise refresh last_seen_at and hand
+        // the device back a usable session (DEV-06).
+        if (!STATUS_ACTIVE.equals(existing.getStatus())) {
+            throw new BusinessException(ErrorCode.DEVICE_DISABLED);
+        }
         LocalDateTime now = TimeUtils.nowUtcLocal();
         existing.setLastSeenAt(now);
         existing.setUpdatedAt(now);

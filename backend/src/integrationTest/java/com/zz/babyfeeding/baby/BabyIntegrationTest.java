@@ -289,6 +289,46 @@ class BabyIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    void patchRejectsNullsWrongScalarTypesAndRevisionZero() throws Exception {
+        String deviceId = newDeviceId();
+        initDeviceOk(deviceId);
+        JsonNode baby = createBaby(deviceId, "小满", true);
+        String babyId = baby.path("id").asText();
+
+        // BABY-10: explicit null is not "absent"; required fields cannot be nulled.
+        Map<String, Object> nullGender = new HashMap<>();
+        nullGender.put("baseRevision", 1);
+        nullGender.put("gender", null);
+        assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId, nullGender), "gender");
+
+        Map<String, Object> nullBirthDate = new HashMap<>();
+        nullBirthDate.put("baseRevision", 1);
+        nullBirthDate.put("birthDate", null);
+        assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId, nullBirthDate),
+                "birthDate");
+
+        Map<String, Object> nullDefault = new HashMap<>();
+        nullDefault.put("baseRevision", 1);
+        nullDefault.put("isDefault", null);
+        assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId, nullDefault), "isDefault");
+
+        // BABY-13 / Q-13: a JSON string is not an Integer (strict scalar typing).
+        assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId,
+                Map.of("baseRevision", "1", "name", "字符串版本")), "baseRevision");
+
+        // 0 is a valid integer but never matches the stored revision: 409, not 400.
+        assertError(patchJson("/api/v1/babies/" + babyId, deviceId,
+                Map.of("baseRevision", 0, "name", "零版本")), 409, "CONFLICT");
+
+        // Legitimate numeric requests still work and increment the revision.
+        MvcResult ok = patchJson("/api/v1/babies/" + babyId, deviceId,
+                Map.of("baseRevision", 1, "name", "小满满"));
+        assertThat(ok.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(ok).path("data").path("name").asText()).isEqualTo("小满满");
+        assertThat(body(ok).path("data").path("revision").asInt()).isEqualTo(2);
+    }
+
+    @Test
     void cacheIsInvalidatedOnWrites() throws Exception {
         String deviceId = newDeviceId();
         initDeviceOk(deviceId);

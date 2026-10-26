@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -116,5 +117,19 @@ class DeviceIntegrationTest extends IntegrationTestBase {
         stringRedisTemplate.delete(deviceCacheKey(deviceId));
 
         assertError(getJson("/api/v1/babies", deviceId), 403, "DEVICE_DISABLED");
+
+        // DEV-06: a disabled device cannot re-initialise itself. init is exempt
+        // from the device interceptor, so the service itself must refuse and
+        // must not refresh the row (last_seen_at/app_version) behind it.
+        LocalDateTime lastSeen = jdbcTemplate.queryForObject(
+                "SELECT last_seen_at FROM device", LocalDateTime.class);
+        assertError(postJson("/api/v1/devices/init", deviceId,
+                Map.of("platform", "H5", "appVersion", "9.9.9")), 403, "DEVICE_DISABLED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM device", String.class)).isEqualTo("DISABLED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT last_seen_at FROM device", LocalDateTime.class)).isEqualTo(lastSeen);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT app_version FROM device", String.class)).isEqualTo("1.0.0");
     }
 }

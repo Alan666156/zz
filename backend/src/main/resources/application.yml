@@ -33,6 +33,12 @@ spring:
     default-property-inclusion: always
     deserialization:
       fail-on-unknown-properties: false
+    # Q-13/Q-19: JSON types are strict. "1" is not accepted for an Integer
+    # (baseRevision) and "true" is not accepted for a Boolean. Date/time values
+    # still parse from their ISO strings; an unparseable date remains a body
+    # format error (BAD_REQUEST), not a field validation error.
+    mapper:
+      allow-coercion-of-scalars: false
   web:
     resources:
       add-mappings: false

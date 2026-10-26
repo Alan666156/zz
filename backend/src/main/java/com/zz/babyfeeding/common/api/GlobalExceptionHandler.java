@@ -1,5 +1,7 @@
 package com.zz.babyfeeding.common.api;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -24,6 +26,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -100,6 +103,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Object>> handleUnreadable(
             HttpMessageNotReadableException ex, HttpServletRequest request) {
+        FieldErrorItem typeMismatch = scalarTypeMismatch(ex.getCause());
+        if (typeMismatch != null) {
+            return validationResponse(List.of(typeMismatch), request);
+        }
         log.warn("unreadable request body path={}", request.getRequestURI());
         return build(ErrorCode.BAD_REQUEST, "请求体格式错误或 JSON 无法解析", null, new HttpHeaders());
     }
@@ -167,6 +174,42 @@ public class GlobalExceptionHandler {
         log.error("unexpected error path={} requestId={}",
                 request.getRequestURI(), org.slf4j.MDC.get("requestId"), ex);
         return build(ErrorCode.INTERNAL_ERROR, null, null, new HttpHeaders());
+    }
+
+    /**
+     * Strict scalar typing (Q-13) turns a value of the wrong JSON type, e.g.
+     * {@code "1"} for an Integer, into a Jackson mismatch. The contract treats
+     * that as a field validation error. Date/time targets are excluded on
+     * purpose: an unparseable date string is a body format error (Q-19), and a
+     * mismatch without a field path is a malformed body, not a field error.
+     */
+    private static FieldErrorItem scalarTypeMismatch(Throwable cause) {
+        for (Throwable current = cause; current != null; current = current.getCause()) {
+            if (current instanceof MismatchedInputException mismatch) {
+                String field = fieldPath(mismatch.getPath());
+                Class<?> target = mismatch.getTargetType();
+                if (field == null || target == null
+                        || TemporalAccessor.class.isAssignableFrom(target)) {
+                    return null;
+                }
+                return new FieldErrorItem(field, "字段类型不正确");
+            }
+        }
+        return null;
+    }
+
+    private static String fieldPath(List<JsonMappingException.Reference> path) {
+        StringBuilder field = new StringBuilder();
+        for (JsonMappingException.Reference reference : path) {
+            if (reference.getFieldName() == null) {
+                continue;
+            }
+            if (!field.isEmpty()) {
+                field.append('.');
+            }
+            field.append(reference.getFieldName());
+        }
+        return field.isEmpty() ? null : field.toString();
     }
 
     private static ResponseEntity<ApiResponse<Object>> validationResponse(

@@ -9,6 +9,7 @@ import com.zz.babyfeeding.baby.dto.DeleteBabyResponse;
 import com.zz.babyfeeding.baby.dto.PatchBabyRequest;
 import com.zz.babyfeeding.common.api.BusinessException;
 import com.zz.babyfeeding.common.api.ErrorCode;
+import com.zz.babyfeeding.common.api.ValidationExceptions;
 import com.zz.babyfeeding.common.redis.RedisCacheService;
 import com.zz.babyfeeding.common.redis.RedisKeys;
 import com.zz.babyfeeding.common.util.TimeUtils;
@@ -136,6 +137,13 @@ public class BabyService {
                               PatchBabyRequest request) {
         Integer baseRevision = request.getBaseRevision();
         BabyValidator.requireBaseRevision(baseRevision);
+        // Explicit null is not "absent": required fields cannot be nulled out
+        // (contract 4.5). Checked before the revision comparison so an invalid
+        // body is always a validation error, whatever the stored revision is.
+        requireNonNullIfPresent(request.isNamePresent(), request.getName(), "name");
+        requireNonNullIfPresent(request.isGenderPresent(), request.getGender(), "gender");
+        requireNonNullIfPresent(request.isBirthDatePresent(), request.getBirthDate(), "birthDate");
+        requireNonNullIfPresent(request.isDefaultPresent(), request.getIsDefault(), "isDefault");
         requireUuid(babyId);
 
         deviceMapper.lockById(device.deviceRowId());
@@ -147,11 +155,11 @@ public class BabyService {
             throw conflict(current);
         }
 
-        // Absent fields stay unchanged; explicit null for a required field is
-        // rejected (contract 4.5). presence flags are set by Jackson.
+        // Absent (null) fields stay unchanged; explicit nulls were rejected
+        // above. Presence flags are set by Jackson.
         String name = request.isNamePresent()
                 ? BabyValidator.normalizeName(request.getName()) : current.getName();
-        String gender = request.isGenderPresent() && request.getGender() != null
+        String gender = request.isGenderPresent()
                 ? BabyValidator.normalizeGender(request.getGender()) : current.getGender();
         LocalDate birthDate = request.isBirthDatePresent()
                 ? request.getBirthDate() : current.getBirthDate();
@@ -161,8 +169,7 @@ public class BabyService {
 
         boolean currentlyDefault = Boolean.TRUE.equals(current.getIsDefault());
         Boolean requestedDefault = request.getIsDefault();
-        boolean newDefault = request.isDefaultPresent() && requestedDefault != null
-                ? requestedDefault : currentlyDefault;
+        boolean newDefault = request.isDefaultPresent() ? requestedDefault : currentlyDefault;
         if (currentlyDefault && Boolean.FALSE.equals(requestedDefault)) {
             throw new BusinessException(ErrorCode.DEFAULT_BABY_REQUIRED);
         }
@@ -286,6 +293,12 @@ public class BabyService {
 
     private static void requireUuid(String babyId) {
         BabyValidator.requireUuidV4("babyId", babyId);
+    }
+
+    private static void requireNonNullIfPresent(boolean present, Object value, String field) {
+        if (present && value == null) {
+            throw ValidationExceptions.field(field, field + " 不能为 null");
+        }
     }
 
     private static BusinessException conflict(BabyEntity current) {

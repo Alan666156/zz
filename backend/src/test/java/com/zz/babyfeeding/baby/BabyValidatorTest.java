@@ -81,7 +81,10 @@ class BabyValidatorTest {
                 BabyValidator.requireUuidV4("babyId", "NOT-A-UUID"), "babyId");
 
         BabyValidator.requireBaseRevision(1);
+        // 0 is syntactically valid: it always misses the stored revision and
+        // becomes 409 CONFLICT (BABY-13).
+        BabyValidator.requireBaseRevision(0);
         assertFieldError(() -> BabyValidator.requireBaseRevision(null), "baseRevision");
-        assertFieldError(() -> BabyValidator.requireBaseRevision(0), "baseRevision");
+        assertFieldError(() -> BabyValidator.requireBaseRevision(-1), "baseRevision");
     }
 }
