@@ -26,6 +26,7 @@ declare module 'vue' {
     OfflineBanner: typeof import('./components/common/OfflineBanner.vue')['default']
     QuickRecordFab: typeof import('./components/record/QuickRecordFab.vue')['default']
     QuickRecordSheet: typeof import('./components/record/QuickRecordSheet.vue')['default']
+    RouteLoadErrorDialog: typeof import('./components/common/RouteLoadErrorDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SolidSheet: typeof import('./components/record/SolidSheet.vue')['default']

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BabyForm from '@/components/baby/BabyForm.vue'
+import { navigateSafely } from '@/router/route-load-error'
 import { useBabyStore } from '@/stores/baby'
 import { useUiStore } from '@/stores/ui'
 import type { Gender } from '@/types/models'
@@ -33,12 +34,12 @@ onMounted(async () => {
   }
   if (isNew.value && !babyStore.canAddMore) {
     ui.toast('最多只能添加 5 个宝宝')
-    await router.replace({ name: 'profile' })
+    await navigateSafely(router, { name: 'profile' }, { replace: true })
     return
   }
   if (!isNew.value && !current.value) {
     ui.toast('宝宝不存在或已删除')
-    await router.replace({ name: 'profile' })
+    await navigateSafely(router, { name: 'profile' }, { replace: true })
   }
 })
 
@@ -53,7 +54,7 @@ async function handleSubmit(payload: Payload): Promise<void> {
       await babyStore.updateBaby(current.value.id, payload)
       ui.toast('已保存')
     }
-    await router.replace({ name: 'profile' })
+    await navigateSafely(router, { name: 'profile' }, { replace: true })
   } catch (error) {
     errorText.value = error instanceof Error ? error.message : '保存失败，请稍后重试'
   } finally {
