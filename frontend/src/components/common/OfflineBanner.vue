@@ -1,18 +1,30 @@
 <script setup lang="ts">
-defineProps<{
-  online: boolean
-  pendingCount?: number
-}>()
+import { computed } from 'vue'
+import {
+  offlineBannerOfflineText,
+  offlinePendingText,
+  syncFailedText,
+  syncingText,
+} from '@/constants/copy'
+import { useSyncStore } from '@/stores/sync'
+
+const sync = useSyncStore()
+
+const visible = computed(
+  () => !sync.online || sync.syncing || sync.pendingCount > 0,
+)
+
+const text = computed(() => {
+  if (!sync.online) return offlineBannerOfflineText(sync.pendingCount)
+  if (sync.syncing) return syncingText(sync.pendingCount)
+  if (sync.failedCount > 0) return syncFailedText(sync.failedCount)
+  return offlinePendingText(sync.pendingCount)
+})
 </script>
 
 <template>
-  <div
-    v-if="!online || (pendingCount ?? 0) > 0"
-    class="offline-banner"
-    data-testid="offline-banner"
-  >
-    <template v-if="!online">当前离线，记录会先保存在本机，联网后自动同步</template>
-    <template v-else>有 {{ pendingCount }} 条记录待同步</template>
+  <div v-if="visible" class="offline-banner" data-testid="offline-banner">
+    {{ text }}
   </div>
 </template>
 

@@ -14,6 +14,7 @@ declare module 'vue' {
     DailySummaryCard: typeof import('./components/record/DailySummaryCard.vue')['default']
     DateNavigator: typeof import('./components/record/DateNavigator.vue')['default']
     EmptyState: typeof import('./components/common/EmptyState.vue')['default']
+    ExportSheet: typeof import('./components/export/ExportSheet.vue')['default']
     FeedingEditSheet: typeof import('./components/record/FeedingEditSheet.vue')['default']
     FeedingRecordItem: typeof import('./components/record/FeedingRecordItem.vue')['default']
     FeedingTimeline: typeof import('./components/record/FeedingTimeline.vue')['default']

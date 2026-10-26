@@ -1,5 +1,12 @@
+<script setup lang="ts">
+import OfflineBanner from '@/components/common/OfflineBanner.vue'
+</script>
+
 <template>
   <div class="layout">
+    <div class="layout__banner">
+      <OfflineBanner />
+    </div>
     <router-view />
     <van-tabbar route fixed placeholder safe-area-inset-bottom data-testid="tabbar">
       <van-tabbar-item replace to="/" data-testid="tabbar-home">首页</van-tabbar-item>
@@ -14,5 +21,13 @@
 <style scoped>
 .layout {
   min-height: 100vh;
+}
+
+.layout__banner {
+  padding: 0 12px;
+}
+
+.layout__banner:empty {
+  display: none;
 }
 </style>

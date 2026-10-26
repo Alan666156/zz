@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import BabyCard from '@/components/baby/BabyCard.vue'
 import BabySwitcher from '@/components/baby/BabySwitcher.vue'
-import OfflineBanner from '@/components/common/OfflineBanner.vue'
 import DailySummaryCard from '@/components/record/DailySummaryCard.vue'
 import FeedingTimeline from '@/components/record/FeedingTimeline.vue'
 import QuickRecordFab from '@/components/record/QuickRecordFab.vue'
@@ -24,7 +23,6 @@ const router = useRouter()
 const babyStore = useBabyStore()
 const feedingStore = useFeedingStore()
 
-const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine !== false)
 const showSwitcher = ref(false)
 const showRecord = ref(false)
 
@@ -69,11 +67,6 @@ const lastAmount = ref<number | null>(
 const lastFeedType = ref<FeedingType>(parseFeedType(getStorageItem(LAST_FEED_TYPE_KEY)))
 
 const activeBaby = computed(() => babyStore.activeBaby)
-const pendingTotal = computed(
-  () =>
-    feedingStore.pendingCount +
-    babyStore.babies.filter((baby) => baby.revision === 0).length,
-)
 
 async function refreshToday(): Promise<void> {
   const baby = activeBaby.value
@@ -90,12 +83,11 @@ watch(
 )
 
 function handleOnline(): void {
-  online.value = true
   void refreshToday()
 }
 
 function handleOffline(): void {
-  online.value = false
+  // 离线状态由 sync store / OfflineBanner 统一展示
 }
 
 function handleSaved(record: FeedingRecord): void {
@@ -134,8 +126,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page home">
-    <OfflineBanner :online="online" :pending-count="pendingTotal" />
-
     <template v-if="activeBaby">
       <BabyCard :baby="activeBaby" active @click="showSwitcher = true" />
       <DailySummaryCard :summary="feedingStore.todaySummary" :loading="feedingStore.loading" />

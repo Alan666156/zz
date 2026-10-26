@@ -1,26 +1,59 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import ExportSheet from '@/components/export/ExportSheet.vue'
+import { DATA_LOSS_WARNING, STORAGE_UNAVAILABLE_WARNING } from '@/constants/copy'
 import { useBabyStore } from '@/stores/baby'
 import { useDeviceStore } from '@/stores/device'
+import { useSyncStore } from '@/stores/sync'
 import { useUiStore } from '@/stores/ui'
 import { GENDER_LABELS, MAX_BABIES, type Baby } from '@/types/models'
-import { calcBabyAge } from '@/utils/date'
+import { calcBabyAge, formatDateTime } from '@/utils/date'
 
 const router = useRouter()
 const babyStore = useBabyStore()
 const deviceStore = useDeviceStore()
+const syncStore = useSyncStore()
 const ui = useUiStore()
 
 deviceStore.bootstrap()
+void syncStore.refreshPending()
 
 const deleteVisible = ref(false)
 const deleteTarget = ref<Baby | null>(null)
+const exportVisible = ref(false)
 
 const pendingBabyCount = computed(
   () => babyStore.babies.filter((baby) => baby.revision === 0).length,
 )
 const deviceShort = computed(() => deviceStore.deviceId.slice(0, 8) || '--------')
+const activeBaby = computed(() => babyStore.activeBaby ?? null)
+const lastSyncedLabel = computed(() =>
+  syncStore.lastSyncedAt ? formatDateTime(syncStore.lastSyncedAt) : '—',
+)
+
+async function manualSync(): Promise<void> {
+  const outcome = await syncStore.syncNow()
+  if (outcome.status === 'offline') {
+    ui.toast('当前离线，联网后自动同步')
+  } else if (outcome.status === 'busy') {
+    ui.toast('同步进行中，请稍候')
+  } else if (outcome.status === 'error') {
+    ui.toast(outcome.message ?? '同步失败，请稍后重试')
+  } else if (outcome.applied + outcome.duplicate > 0) {
+    ui.toast(`同步完成，已同步 ${outcome.applied + outcome.duplicate} 条`)
+  } else {
+    ui.toast(outcome.pending > 0 ? '仍有记录待同步' : '没有待同步记录')
+  }
+}
+
+function openExport(): void {
+  if (!activeBaby.value) {
+    ui.toast('请先创建宝宝档案')
+    return
+  }
+  exportVisible.value = true
+}
 
 function openAdd(): void {
   if (!babyStore.canAddMore) {
@@ -144,6 +177,63 @@ async function confirmDelete(): Promise<void> {
       </van-button>
     </section>
 
+    <div class="section-title">同步状态</div>
+    <section class="card device-card" data-testid="profile-sync-status">
+      <div class="device-card__row">
+        <span class="text-secondary">网络</span>
+        <span class="device-card__value">{{ syncStore.online ? '在线' : '离线' }}</span>
+      </div>
+      <div class="device-card__row">
+        <span class="text-secondary">待同步</span>
+        <span class="device-card__value">{{ syncStore.pendingCount }} 条</span>
+      </div>
+      <div v-if="syncStore.failedCount > 0" class="device-card__row">
+        <span class="text-secondary">同步失败</span>
+        <span class="device-card__value device-card__value--danger">
+          {{ syncStore.failedCount }} 条
+        </span>
+      </div>
+      <div class="device-card__row">
+        <span class="text-secondary">上次同步</span>
+        <span class="device-card__value">{{ lastSyncedLabel }}</span>
+      </div>
+      <p v-if="syncStore.lastError" class="device-card__warning">{{ syncStore.lastError }}</p>
+      <p v-if="syncStore.failedCount > 0" class="device-card__note text-secondary">
+        同步失败的记录已保留在本机，请打开对应记录修改后重新保存以再次同步。
+      </p>
+      <van-button
+        block
+        round
+        plain
+        type="primary"
+        size="small"
+        :loading="syncStore.syncing"
+        data-testid="profile-sync-now"
+        @click="manualSync"
+      >
+        立即同步
+      </van-button>
+    </section>
+
+    <div class="section-title">数据导出</div>
+    <section class="card device-card">
+      <p class="device-card__note text-secondary">
+        导出当前宝宝的喂养记录为 CSV（UTF-8 BOM，Excel 可直接打开）。导出为只读操作，不影响本机数据。
+      </p>
+      <van-button
+        block
+        round
+        type="primary"
+        size="small"
+        :disabled="!activeBaby"
+        data-testid="profile-export"
+        @click="openExport"
+      >
+        导出喂养记录
+      </van-button>
+      <p class="device-card__note text-secondary">下载链接由服务端签发，5 分钟内有效。</p>
+    </section>
+
     <div class="section-title">设备与数据</div>
     <section class="card device-card">
       <div class="device-card__row">
@@ -159,13 +249,14 @@ async function confirmDelete(): Promise<void> {
         <span class="device-card__value">1.0.0</span>
       </div>
       <p v-if="!deviceStore.storageAvailable" class="device-card__warning">
-        当前浏览器无法持久保存设备 ID（可能是无痕模式）。关闭无痕模式后才能保留数据。
+        {{ STORAGE_UNAVAILABLE_WARNING }}
       </p>
       <p class="device-card__note text-secondary" data-testid="profile-data-warning">
-        宝宝与记录绑定当前设备 ID。清除浏览器数据、更换浏览器/设备或丢失设备 ID，
-        都会导致本机数据无法找回；离线期间尚未同步的记录也会一并丢失。请勿在无痕模式长期使用。
+        {{ DATA_LOSS_WARNING }}
       </p>
     </section>
+
+    <ExportSheet v-model:show="exportVisible" :baby="activeBaby" />
 
     <van-dialog
       v-model:show="deleteVisible"
@@ -263,6 +354,10 @@ async function confirmDelete(): Promise<void> {
 
 .device-card__value {
   font-weight: 500;
+}
+
+.device-card__value--danger {
+  color: #ee0a24;
 }
 
 .device-card__warning {

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import OfflineBanner from '@/components/common/OfflineBanner.vue'
 import DateNavigator from '@/components/record/DateNavigator.vue'
 import FeedingEditSheet from '@/components/record/FeedingEditSheet.vue'
 import FeedingTimeline from '@/components/record/FeedingTimeline.vue'
@@ -18,7 +17,6 @@ const ui = useUiStore()
 
 const today = todayLocalDate()
 const selectedDate = ref(today)
-const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine !== false)
 const editVisible = ref(false)
 const editTarget = ref<FeedingRecord | null>(null)
 const deleteVisible = ref(false)
@@ -26,11 +24,6 @@ const deleteTarget = ref<FeedingRecord | null>(null)
 
 const activeBaby = computed(() => babyStore.activeBaby)
 const minDate = computed(() => activeBaby.value?.birthDate ?? today)
-const pendingTotal = computed(
-  () =>
-    feedingStore.pendingCount +
-    babyStore.babies.filter((baby) => baby.revision === 0).length,
-)
 const hasError = computed(() => Boolean(feedingStore.lastError))
 
 function clampDate(date: string): string {
@@ -86,12 +79,11 @@ async function confirmDelete(): Promise<void> {
 }
 
 function handleOnline(): void {
-  online.value = true
   void loadPage()
 }
 
 function handleOffline(): void {
-  online.value = false
+  // 离线状态由 sync store / OfflineBanner 统一展示
 }
 
 watch(
@@ -124,8 +116,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page records" data-testid="records-page">
-    <OfflineBanner :online="online" :pending-count="pendingTotal" />
-
     <DateNavigator
       :date="selectedDate"
       :min-date="minDate"
