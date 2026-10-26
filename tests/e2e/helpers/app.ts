@@ -8,6 +8,7 @@ import {
 } from '@playwright/test';
 
 import { API_BASE_URL, API_PREFIX, addDays } from '../../api/helpers/env';
+import { KNOWN_NETWORK_ERRORS } from './page';
 import { uuid } from '../../api/helpers/fixtures';
 import { flushRedisDb } from '../../api/helpers/redis';
 
@@ -17,8 +18,8 @@ import { flushRedisDb } from '../../api/helpers/redis';
  * 约束：
  * - 每个场景新 browser context（新设备 UUID），beforeEach 清空 Redis DB14。
  * - 页面选择器只用 frontend/README.md 登记的 data-testid；本文件集中收口。
- * - 前端未提供 testid 的位置（侧别按钮、删除确认框）用可访问角色定位，
- *   已在 TE-03 报告中登记为选择器缺口，待 frontend-dev 补 testid 后替换。
+ * - 侧别按钮、删除确认、首页摘要、生长最新日期已使用 Q-14 补登记的 testid；
+ *   仅统计页摘要卡仍按标签文本读取（StatsView 尚未提供 testid）。
  */
 
 /** Q-15 固定 localStorage key */
@@ -415,7 +416,7 @@ export function expectedBabyAgeLabel(birthDate: string, today: string): string {
   return `${months} 个月 ${days} 天`;
 }
 
-/** 首页/统计页摘要卡按标签读取数值（当前摘要卡未暴露 testid，见 TE-03 报告）。 */
+/** 统计页摘要卡按标签读取数值（StatsView 尚未提供 summary testid；首页已改用 `summary-*`）。 */
 export async function labelledValue(scope: Locator, label: string): Promise<string> {
   const item = scope.getByText(label, { exact: true }).locator('..');
   return (await item.locator('span').first().innerText()).trim();
@@ -439,12 +440,9 @@ export async function selectFeedType(
   await expect(tab).toHaveAttribute('aria-selected', 'true');
 }
 
-/** 选择母乳侧别：当前前端未提供 data-testid，用可访问角色定位（报告中登记）。 */
-export function breastSideButton(page: Page, label: '左侧' | '右侧' | '双侧'): Locator {
-  return page
-    .getByTestId('quick-record-sheet')
-    .getByRole('group', { name: '母乳侧别' })
-    .getByRole('button', { name: label, exact: true });
+/** 选择母乳侧别（Q-14 新增 `breast-side-*`，作用域限定在快速记录弹层内）。 */
+export function breastSideButton(page: Page, side: 'left' | 'right' | 'both'): Locator {
+  return page.getByTestId('quick-record-sheet').getByTestId(`breast-side-${side}`);
 }
 
 /** 记录一条配方奶/混合奶量（混合记录需先调用 selectFeedType('mixed')）。 */
@@ -466,7 +464,7 @@ export async function waitForToastToHide(page: Page, timeout = 8_000): Promise<v
   await expect(page.getByTestId('app-toast')).toBeHidden({ timeout });
 }
 
-/** 删除确认框：Vant Dialog 暴露 role=dialog，按钮文案“删除”（testid 缺口，见报告）。 */
+/** 删除确认框：Vant Dialog 暴露 role=dialog；确认按钮用 `confirm-delete`。 */
 export function confirmDeleteDialog(page: Page, messagePart: string): Locator {
   return page.getByRole('dialog').filter({ hasText: messagePart });
 }
@@ -614,10 +612,13 @@ export function expectNoUnexpectedErrors(
   expect(unexpected, `页面出现未预期的错误：\n${unexpected.join('\n')}`).toEqual([]);
 }
 
-/** 离线/请求失败时浏览器会打网络日志，这些不是页面未捕获异常。 */
+/**
+ * 离线/请求失败时浏览器会打网络日志，这些不是页面未捕获异常。
+ * 仅豁免 net:: 层失败与已登记的已知噪音，不笼统放过所有 4xx/5xx。
+ */
 export const OFFLINE_NETWORK_LOGS: readonly RegExp[] = [
+  ...KNOWN_NETWORK_ERRORS,
   /ERR_INTERNET_DISCONNECTED/,
   /ERR_NETWORK/,
-  /net::/,
-  /Failed to load resource/,
+  /net::ERR_/,
 ];

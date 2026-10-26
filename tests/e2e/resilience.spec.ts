@@ -16,7 +16,7 @@ import {
   selectFeedType,
   waitForFeedingCount,
 } from './helpers/app';
-import { collectPageErrors } from './helpers/page';
+import { KNOWN_NETWORK_ERRORS, collectPageErrors } from './helpers/page';
 
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §5.4、§5.7、§2.5
@@ -82,7 +82,10 @@ test.describe('E2E 韧性与安全（UI-19..21）', () => {
     });
     await expect(page.getByTestId('stats-empty')).toHaveCount(0);
 
-    expectNoUnexpectedErrors(errors, [/Failed to load resource.*500/]);
+    expectNoUnexpectedErrors(errors, [
+      ...KNOWN_NETWORK_ERRORS,
+      /Failed to load resource: the server responded with a status of 500.*\/api\/v1\/stats\/trend/,
+    ]);
   });
 
   test('UI-20 控制台无错误、无 Service Worker', async ({ page, request }) => {
@@ -114,8 +117,8 @@ test.describe('E2E 韧性与安全（UI-19..21）', () => {
     );
     expect(registrations, 'V1.0 不应注册 Service Worker').toBe(0);
 
-    // 首次 GET /babies 的 409 DEVICE_NOT_REGISTERED 是预期内的自动初始化路径。
-    expectNoUnexpectedErrors(errors, [/Failed to load resource.*409/]);
+    // 首次 GET /babies 的 409 与 favicon 404 是已知网络噪音，逐条豁免见 helpers/page.ts。
+    expectNoUnexpectedErrors(errors, KNOWN_NETWORK_ERRORS);
   });
 
   test('UI-21 宝宝名 XSS 载荷按文本渲染', async ({ page, request }) => {

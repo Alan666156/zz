@@ -46,12 +46,24 @@ export async function apiContextForDevice(deviceId: string): Promise<APIRequestC
   });
 }
 
-/** 收集控制台 error 与未捕获异常；离线场景需在 TE-03 中维护白名单。 */
+/**
+ * 已知的网络噪音（不是应用异常）：
+ * - 首次 GET /babies 在设备注册前返回 409 DEVICE_NOT_REGISTERED（契约 §5.4 的正常流程）；
+ * - 前端未提供 favicon，Chrome 自动请求 /favicon.ico 得到 404（TE-04 缺陷 FE-01）。
+ * 逐条说明，避免笼统豁免所有 console.error。
+ */
+export const KNOWN_NETWORK_ERRORS: readonly RegExp[] = [
+  /Failed to load resource: the server responded with a status of 409 \(Conflict\).*\/api\/v1\/babies/,
+  /Failed to load resource: the server responded with a status of 404 \(Not Found\).*\/favicon\.ico/,
+];
+
+/** 收集控制台 error 与未捕获异常；资源加载失败带上来源 URL 以便精确豁免。 */
 export function collectPageErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') {
-      errors.push(`console.error: ${message.text()}`);
+      const url = message.location()?.url;
+      errors.push(`console.error: ${message.text()}${url ? ` (${url})` : ''}`);
     }
   });
   page.on('pageerror', (error) => {
@@ -60,6 +72,10 @@ export function collectPageErrors(page: Page): string[] {
   return errors;
 }
 
-export function expectNoPageErrors(errors: readonly string[]): void {
-  expect(errors, `页面出现未预期的错误：\n${errors.join('\n')}`).toEqual([]);
+export function expectNoPageErrors(
+  errors: readonly string[],
+  allowed: readonly RegExp[] = KNOWN_NETWORK_ERRORS,
+): void {
+  const unexpected = errors.filter((message) => !allowed.some((pattern) => pattern.test(message)));
+  expect(unexpected, `页面出现未预期的错误：\n${unexpected.join('\n')}`).toEqual([]);
 }

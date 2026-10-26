@@ -4,7 +4,6 @@ import {
   breastSideButton,
   expectToast,
   fillMilkAmount,
-  labelledValue,
   onboardWithApi,
   openQuickRecord,
   resetE2eState,
@@ -136,8 +135,8 @@ test.describe('E2E 快速记录（UI-04..10）', () => {
     await expect(item).toHaveCount(1);
     await expect(item).toContainText('120 毫升');
 
-    expect(await labelledValue(page.locator('body'), '喂养次数')).toBe('1');
-    expect(await labelledValue(page.locator('body'), '奶量 (ml)')).toBe('120');
+    await expect(page.getByTestId('summary-feed-count')).toHaveText('1');
+    await expect(page.getByTestId('summary-total-amount')).toHaveText('120');
 
     const [record] = await waitForFeedingCount(api, baby.id, today, 1);
     expect(record.amountValue).toBe(120);
@@ -151,7 +150,7 @@ test.describe('E2E 快速记录（UI-04..10）', () => {
 
     await openQuickRecord(page);
     await selectFeedType(page, 'mixed');
-    await breastSideButton(page, '双侧').click();
+    await breastSideButton(page, 'both').click();
     await page.waitForTimeout(2_100);
     await fillMilkAmount(page, 90);
     await page.getByTestId('breast-timer-finish').click();

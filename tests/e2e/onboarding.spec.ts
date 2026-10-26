@@ -96,12 +96,8 @@ test.describe('E2E 首次使用（UI-01..03）', () => {
       deletedAt: null,
     });
 
-    // 已知且允许的日志：首次 GET /babies 返回 409 DEVICE_NOT_REGISTERED，随后自动 init。
-    expectNoPageErrors(
-      errors.filter(
-        (message) => !/Failed to load resource.*409/.test(message),
-      ),
-    );
+    // 已知网络噪音（首次 GET /babies 的 409、favicon 404）由 helpers/page.ts 逐条豁免。
+    expectNoPageErrors(errors);
   });
 
   test('UI-02 刷新后设备与默认宝宝保持', async ({ page, request }) => {

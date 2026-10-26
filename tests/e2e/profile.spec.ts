@@ -4,7 +4,6 @@ import {
   confirmDeleteDialog,
   expectToast,
   fillMilkAmount,
-  labelledValue,
   onboardWithApi,
   openQuickRecord,
   openTab,
@@ -82,8 +81,8 @@ test.describe('E2E 多宝宝（UI-18）', () => {
     await openTab(page, 'home');
     await expect(page.getByTestId('baby-card')).toContainText('小满');
     await expect(page.getByTestId('feeding-record-item')).toHaveCount(1);
-    expect(await labelledValue(page.locator('body'), '喂养次数')).toBe('1');
-    expect(await labelledValue(page.locator('body'), '奶量 (ml)')).toBe('120');
+    await expect(page.getByTestId('summary-feed-count')).toHaveText('1');
+    await expect(page.getByTestId('summary-total-amount')).toHaveText('120');
 
     await page.getByTestId('baby-card').click();
     await expect(page.getByTestId('baby-switcher-item').filter({ hasText: '小海' })).toBeVisible();
@@ -91,13 +90,13 @@ test.describe('E2E 多宝宝（UI-18）', () => {
     await expect(page.getByTestId('baby-card')).toContainText('小海');
     await expect(page.getByTestId('feeding-timeline')).toContainText('今天还没有记录');
     await expect(page.getByTestId('feeding-record-item')).toHaveCount(0);
-    await expect.poll(() => labelledValue(page.locator('body'), '喂养次数')).toBe('0');
+    await expect(page.getByTestId('summary-feed-count')).toHaveText('0');
 
     await page.getByTestId('baby-card').click();
     await page.getByTestId('baby-switcher-item').filter({ hasText: '小满' }).click();
     await expect(page.getByTestId('baby-card')).toContainText('小满');
     await expect(page.getByTestId('feeding-record-item')).toHaveCount(1);
-    await expect.poll(() => labelledValue(page.locator('body'), '喂养次数')).toBe('1');
+    await expect(page.getByTestId('summary-feed-count')).toHaveText('1');
 
     // 删除默认宝宝 B1：需二次确认并提示级联删除记录。
     await openTab(page, 'profile');
@@ -106,7 +105,7 @@ test.describe('E2E 多宝宝（UI-18）', () => {
     await firstRow.getByTestId('profile-delete-baby').click();
     const dialog = confirmDeleteDialog(page, '喂养与生长记录也会一并删除');
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: '删除', exact: true }).click();
+    await dialog.getByTestId('confirm-delete').click();
     await expectToast(page, '已删除');
 
     const remaining = await pollUntil(

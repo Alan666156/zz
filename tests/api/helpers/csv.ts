@@ -23,6 +23,8 @@ export async function downloadCsv(
   downloadUrl: string,
   extraHeaders: Record<string, string> = {},
 ): Promise<CsvDownload> {
+  // 故意只声明 `text/csv`：下载成功必须是 CSV；失败响应仍须按契约返回 JSON 错误包
+  // （BE-08 FIX-BE-01 已固定错误 Content-Type，不依赖 Accept）。
   const response = await context.get(downloadUrl, {
     headers: { Accept: 'text/csv', ...extraHeaders },
   });

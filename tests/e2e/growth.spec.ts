@@ -32,6 +32,7 @@ test.describe('E2E 生长页（UI-13）', () => {
     await expect(page.getByTestId('growth-latest-weight')).toHaveText('--');
     await expect(page.getByTestId('growth-latest-head')).toHaveText('--');
     await expect(page.getByTestId('growth-latest')).toContainText('还没有测量记录');
+    await expect(page.getByTestId('growth-latest-date')).toHaveCount(0);
 
     // 三项全空时保存按钮不可用。
     await page.getByTestId('growth-add').click();
@@ -64,8 +65,7 @@ test.describe('E2E 生长页（UI-13）', () => {
     });
     expect(created.note).toBeNull();
 
-    // 最新测量日期暂无独立 testid，从 latest 卡文本读取（选择器缺口已上报）。
-    await expect(page.getByTestId('growth-latest')).toContainText(`测量于 ${today}`);
+    await expect(page.getByTestId('growth-latest-date')).toHaveText(today);
     await expect(page.getByTestId('growth-latest-height')).toHaveText('68.5 cm');
     await expect(page.getByTestId('growth-latest-weight')).toHaveText('8.12 kg');
     await expect(page.getByTestId('growth-latest-head')).toHaveText('43.0 cm');

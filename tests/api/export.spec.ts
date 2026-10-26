@@ -9,6 +9,7 @@ import {
   stripBom,
 } from './helpers/csv';
 import { execSql, queryOne } from './helpers/db';
+import { flushRedisDb } from './helpers/redis';
 import { deviceHashHex } from './helpers/device-hash';
 import {
   decodeExportTokenPayload,
@@ -84,7 +85,8 @@ test.describe('CSV 导出（EXP）', () => {
 
     const download = await downloadCsv(request, ticket.data.downloadUrl);
     expect(download.status).toBe(200);
-    expect(download.headers['content-type']).toBe('text/csv; charset=UTF-8');
+    // Tomcat 会去掉 `;` 后的可选空白（RFC 9110 OWS），语义仍为 text/csv + UTF-8。
+    expect(download.headers['content-type']).toMatch(/^text\/csv;\s*charset=UTF-8$/i);
     expect(download.headers['content-disposition']).toBe(
       'attachment; filename="feeding-records-2026-10-20-2026-10-20.csv"',
     );
@@ -288,6 +290,10 @@ test.describe('CSV 导出（EXP）', () => {
       );
     }
 
+    // 导出限流为 5 次/小时/设备，且契约 §2.4 不区分成败、POST 即计数：
+    // 上面 5 次参数校验已用满额度。本用例校验的是参数与归属，不是限流，
+    // 因此清空 DB14 的计数后再验证 366 天成功路径（限流专项见 RL）。
+    flushRedisDb();
     await expectOk(
       await client.post('/exports/feeding-records', {
         babyId: baby.id,

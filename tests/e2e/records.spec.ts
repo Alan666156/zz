@@ -114,7 +114,7 @@ test.describe('E2E 记录页（UI-11）', () => {
     const dialog = confirmDeleteDialog(page, '删除后无法恢复');
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('确认删除这条喂养记录吗？');
-    await dialog.getByRole('button', { name: '删除', exact: true }).click();
+    await dialog.getByTestId('confirm-delete').click();
     await expectToast(page, '已删除');
     await expect(page.getByTestId('records-page')).toContainText('这一天没有记录');
 
