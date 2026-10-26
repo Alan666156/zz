@@ -305,7 +305,10 @@ export const useBabyStore = defineStore('baby', {
         await putBabiesCache(this.babies)
         await removeOutbox(outboxKey('BABY', id))
         this.lastError = null
-        return serverBaby
+        // 设为默认时服务端会同时递增旧默认宝宝的 revision，本地只有被 PATCH 的那条是新的；
+        // 不重新拉取会导致之后编辑旧默认宝宝 409（FE-06）。
+        if (patch.isDefault === true) await this.refreshFromServer()
+        return this.babies.find((baby) => baby.id === id) ?? serverBaby
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           // 在线 PATCH 已删除宝宝 → 404，从本机移除（契约 Q-06）
@@ -367,6 +370,8 @@ export const useBabyStore = defineStore('baby', {
         await deleteBabyRequest(id, current.revision)
         await removeOutbox(key)
         this.lastError = null
+        // 删除默认宝宝时服务端会提升另一个宝宝并递增其 revision，重新拉取对齐（FE-06）
+        if (current.isDefault) await this.refreshFromServer()
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           await removeOutbox(key)
@@ -401,6 +406,8 @@ export const useBabyStore = defineStore('baby', {
       } catch {
         // 缓存失败不影响 Pinia
       }
+      // 服务端设默认时会递增旧默认宝宝的 revision；异步全量对齐，避免之后编辑旧默认宝宝 409（FE-06）
+      if (baby.isDefault) void this.refreshFromServer()
     },
 
     /** sync tombstone：宝宝及其记录一并从本地清除，绝不复活 */

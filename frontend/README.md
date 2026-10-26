@@ -124,6 +124,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 - `PATCH` 请求体**不得**包含 `babyId`（Q-04），前端由 `toFeedingPatchData()` 统一剥离。
 - 设备注册（UI-01）：任意请求返回 409 `DEVICE_NOT_REGISTERED` 时，`api/client.ts` 通过 device store 的 `onDeviceNotRegistered()` 初始化后重试一次，而不是直接调 `initDevice()`；store 内并发 `init()` 共享同一个进行中请求，`registered` 置位后 router 的 `ensureInitialized()` 不再发请求。
 - 列表合并（FE-04）：宝宝 / 喂养 / 生长的服务端列表按 outbox 未完成项（`pendingOutboxOps()`）合并——pending `UPSERT` 的 id 用本地值覆盖服务端旧值，pending `DELETE` 的 id 从服务端列表剔除且不得复活；其余记录以服务端为准。离线编辑过的已同步记录、离线删除但服务端仍存在的记录都不会被一次刷新抹掉。
+- 默认宝宝 revision（FE-06）：服务端切换默认宝宝时会同时递增**旧默认宝宝**的 revision，删除默认宝宝时会提升另一个宝宝并递增其 revision。本地只更新被 PATCH/DELETE 的那一条会导致之后编辑旧默认宝宝 409，且 409 分支不会自动自愈；因此在线设置默认、在线删除默认宝宝、以及同步结果把某个宝宝应用为默认后，都会重新拉取宝宝列表对齐所有 revision（sync 路径为异步刷新，不阻塞推送）。
 
 ## `data-testid` 清单（Q-14）
 

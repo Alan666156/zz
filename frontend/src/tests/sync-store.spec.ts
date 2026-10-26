@@ -25,7 +25,16 @@ const syncMocks = vi.hoisted(() => ({
   pushSyncBatch: vi.fn(),
 }))
 
+const babyApiMocks = vi.hoisted(() => ({
+  fetchBabies: vi.fn(),
+  createBabyRequest: vi.fn(),
+  patchBabyRequest: vi.fn(),
+  deleteBabyRequest: vi.fn(),
+}))
+
 vi.mock('@/api/sync', () => syncMocks)
+// 同步应用默认宝宝后会异步刷新宝宝列表（FE-06），测试里保持离线避免真实请求
+vi.mock('@/api/babies', () => babyApiMocks)
 
 type Change = {
   entityType: 'BABY' | 'FEEDING_RECORD' | 'GROWTH_RECORD'
@@ -158,6 +167,8 @@ describe('sync store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     syncMocks.pushSyncBatch.mockReset()
+    babyApiMocks.fetchBabies.mockReset()
+    babyApiMocks.fetchBabies.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
   })
 
   it('按 BABY 优先、每批 ≤50 推送，APPLIED 后清空 outbox', async () => {
