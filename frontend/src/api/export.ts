@@ -38,6 +38,16 @@ export function resolveExportDownloadUrl(downloadUrl: string): string {
 }
 
 /**
+ * 签名下载链接是否已过期（Q-16，TTL 300 秒）。
+ * expiresAt 缺失或无法解析时按已过期处理，避免把明显失效的链接交给浏览器。
+ */
+export function isExportLinkExpired(expiresAt: string, now = Date.now()): boolean {
+  const expiry = Date.parse(expiresAt)
+  if (Number.isNaN(expiry)) return true
+  return now >= expiry
+}
+
+/**
  * 签名 URL 导航下载（微信/iOS WebView 对 blob 下载支持差）。
  * 使用新窗口/新标签打开，失败时页面保留导出链接供复制。
  */

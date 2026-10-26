@@ -37,3 +37,5 @@ export const EXPORT_RATE_LIMIT_COPY = '导出过于频繁（每小时最多 5 �
 export const EXPORT_TOO_LARGE_COPY = '导出数据过多，请缩小日期范围后重试。'
 
 export const EXPORT_CLIPBOARD_UNAVAILABLE_COPY = '当前环境无法自动复制，请长按链接手动复制。'
+
+export const EXPORT_LINK_EXPIRED_COPY = '下载链接已过期，请重新导出。'

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError } from '@/api/client'
 import {
   createFeedingExport,
+  isExportLinkExpired,
   resolveExportDownloadUrl,
   triggerExportDownload,
   type FeedingExportTicket,
@@ -11,6 +12,7 @@ import {
   EXPORT_CLIPBOARD_UNAVAILABLE_COPY,
   EXPORT_FAILURE_COPY,
   EXPORT_FALLBACK_COPY,
+  EXPORT_LINK_EXPIRED_COPY,
   EXPORT_RATE_LIMIT_COPY,
   EXPORT_TOO_LARGE_COPY,
 } from '@/constants/copy'
@@ -42,6 +44,34 @@ const loading = ref(false)
 const errorText = ref('')
 const ticket = ref<FeedingExportTicket | null>(null)
 const copied = ref(false)
+const nowMs = ref(Date.now())
+let expiryTimer: ReturnType<typeof setInterval> | null = null
+
+/** 签名链接 TTL 由服务端 expiresAt 决定（Q-16，300 秒） */
+const linkExpired = computed(() =>
+  ticket.value ? isExportLinkExpired(ticket.value.expiresAt, nowMs.value) : false,
+)
+
+function stopExpiryTimer(): void {
+  if (expiryTimer) clearInterval(expiryTimer)
+  expiryTimer = null
+}
+
+function startExpiryTimer(): void {
+  stopExpiryTimer()
+  nowMs.value = Date.now()
+  // 只需在 TTL 边界附近刷新，5 秒粒度足够
+  expiryTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 5_000)
+}
+
+watch(ticket, (value) => {
+  if (value) startExpiryTimer()
+  else stopExpiryTimer()
+})
+
+onBeforeUnmount(stopExpiryTimer)
 
 const maxDate = todayLocalDate()
 const downloadUrl = computed(() =>
@@ -128,12 +158,24 @@ async function handleSubmit(): Promise<void> {
   }
 }
 
+function ensureLinkUsable(): boolean {
+  if (linkExpired.value) {
+    errorText.value = EXPORT_LINK_EXPIRED_COPY
+    return false
+  }
+  return true
+}
+
 function downloadAgain(): void {
-  if (ticket.value) triggerExportDownload(ticket.value.downloadUrl)
+  if (!ticket.value) return
+  if (!ensureLinkUsable()) return
+  triggerExportDownload(ticket.value.downloadUrl)
 }
 
 async function copyLink(): Promise<void> {
   if (!downloadUrl.value) return
+  // 过期链接复制后同样打不开，直接提示重新导出
+  if (!ensureLinkUsable()) return
   try {
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
     if (!clipboard || typeof clipboard.writeText !== 'function') {
@@ -213,7 +255,10 @@ async function copyLink(): Promise<void> {
               : '该范围没有记录，将下载仅含表头的 CSV'
           }}
         </p>
-        <p class="export-sheet__hint text-secondary">链接 5 分钟内有效。</p>
+        <p v-if="linkExpired" class="export-sheet__error" data-testid="export-link-expired">
+          {{ EXPORT_LINK_EXPIRED_COPY }}
+        </p>
+        <p v-else class="export-sheet__hint text-secondary">链接 5 分钟内有效。</p>
         <input
           class="export-sheet__link"
           :value="downloadUrl"

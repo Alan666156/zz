@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  isExportLinkExpired,
   resolveExportDownloadUrl,
   triggerExportDownload,
 } from '@/api/export'
@@ -31,5 +32,25 @@ describe('export download url', () => {
     expect(anchor.target).toBe('_blank')
     expect(document.querySelector('a[href*="token.csv"]')).toBeNull()
     click.mockRestore()
+  })
+})
+
+describe('export token 有效期（Q-16）', () => {
+  const expiresAt = '2026-10-26T10:05:00.000Z'
+
+  it('到期前可用', () => {
+    const now = Date.parse('2026-10-26T10:04:59.000Z')
+    expect(isExportLinkExpired(expiresAt, now)).toBe(false)
+  })
+
+  it('到期时刻及之后视为过期', () => {
+    const expiry = Date.parse(expiresAt)
+    expect(isExportLinkExpired(expiresAt, expiry)).toBe(true)
+    expect(isExportLinkExpired(expiresAt, expiry + 1)).toBe(true)
+  })
+
+  it('非法或缺失 expiresAt 一律按过期处理', () => {
+    expect(isExportLinkExpired('not-a-date', Date.now())).toBe(true)
+    expect(isExportLinkExpired('', Date.now())).toBe(true)
   })
 })
