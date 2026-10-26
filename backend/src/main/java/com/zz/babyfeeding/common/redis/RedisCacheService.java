@@ -60,18 +60,35 @@ public class RedisCacheService {
     }
 
     /**
-     * Increments a counter and (re)applies its TTL on first use. Returns 0 when
-     * Redis is unavailable so callers can fall back to uncached behaviour.
+     * Increments a counter and re-applies its TTL on every call, as required by
+     * the stats version contract (contract 2.4: 7 d, reset after each INCR).
+     * Returns 0 when Redis is unavailable so callers can fall back to uncached
+     * behaviour.
      */
     public long increment(String key, Duration ttl) {
         try {
             Long value = redis.opsForValue().increment(key);
-            if (value != null && value == 1L) {
+            if (value != null) {
                 redis.expire(key, ttl);
             }
             return value == null ? 0L : value;
         } catch (Exception ex) {
             log.warn("redis increment failed (fail-open) key={} cause={}",
+                    key, ex.getClass().getSimpleName());
+            return 0L;
+        }
+    }
+
+    /**
+     * Reads a plain numeric counter (the stats version). Missing keys and Redis
+     * failures both yield 0, which keeps cache keys valid and fail-open.
+     */
+    public long currentVersion(String key) {
+        try {
+            String raw = redis.opsForValue().get(key);
+            return raw == null ? 0L : Long.parseLong(raw);
+        } catch (Exception ex) {
+            log.warn("redis version read failed (fail-open) key={} cause={}",
                     key, ex.getClass().getSimpleName());
             return 0L;
         }
