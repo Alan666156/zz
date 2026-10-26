@@ -477,16 +477,14 @@ export type TabName = 'home' | 'records' | 'stats' | 'growth' | 'profile';
 /**
  * 每个 Tab 的落地锚点。点击后必须等目标页真实渲染，避免离线/懒加载失败时
  * 仍停留在原页面却被误判为“已切换”（UI-16/TE04-10 的历史教训）。
- *
- * 说明：`home-page` / `profile-page` 尚未提供，先用页面内唯一稳定节点兜底；
- * frontend-dev 补齐 page 级 testid 后应替换为对应 page 根节点。
+ * FE-11 已补齐 `home-page` / `profile-page`，统一使用页面根节点。
  */
 const TAB_LANDING_TESTID: Record<TabName, string> = {
-  home: 'baby-card',
+  home: 'home-page',
   records: 'records-page',
   stats: 'stats-page',
   growth: 'growth-page',
-  profile: 'profile-sync-status',
+  profile: 'profile-page',
 };
 
 export async function openTab(page: Page, tab: TabName): Promise<void> {
