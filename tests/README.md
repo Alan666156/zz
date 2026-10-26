@@ -179,7 +179,7 @@ npm run test:e2e
 npm test
 ```
 
-`npx playwright test --list` 列出 **156 条**：134 条 API + 22 条 E2E。另有 13 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
+`npx playwright test --list` 列出 **156 条**：134 条 API + 22 条 E2E。另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
 
 **执行前提**：后端已实现对应接口，且 `DB_PASSWORD`、`REDIS_PASSWORD`、`APP_DEVICE_PEPPER`、`APP_EXPORT_TOKEN_KEY` 与本机 MySQL/Redis 可达。缺少任一条件时 API 套件会在 `beforeEach` 的 Redis/DB 辅助函数处报错，属于环境未就绪，不是断言失败。仅实现 BE-01..BE-03 的后端只能覆盖 GEN/DEV/BABY/HEALTH，其余模块会因 404/校验差异失败。
 

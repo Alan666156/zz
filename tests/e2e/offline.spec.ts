@@ -28,7 +28,7 @@ const OFFLINE_ROUTE_COPY = '当前网络不可用，页面尚未加载，请恢�
  * 契约：docs/architecture/v1.0-baby-feeding.md §5.4、§4.10；
  *       docs/architecture/v1.0-contract-addendum.md §7（Q-24）
  * 用例：docs/tests/v1.0.md §18（UI-15、UI-16、UI-22）
- * 状态：TE-03 可执行断言；UI-22 待 frontend-dev 补齐 Q-24 P1（CSS preload 失败识别）。
+ * 状态：TE-03 可执行断言；UI-22 已随 FE-11 修复通过（CSS preload 识别 + 重试）。
  */
 test.describe('E2E 离线（UI-15..16、UI-22）', () => {
   test.describe.configure({ timeout: 120_000 });
@@ -144,8 +144,8 @@ test.describe('E2E 离线（UI-15..16、UI-22）', () => {
     await expectToast(page, '已删除');
     await expect(items).toHaveCount(1, { timeout: 10_000 });
     await expect(items.first()).toContainText('100 毫升');
-    // 注：删除 revision=0 的离线新建记录不会触发 sync.refreshPending，
-    // 横幅在此时仍显示旧计数；该独立问题记入 TE04-11（P2），不作为 Q-24 验收门槛。
+    // TE04-11：删除未同步新建记录后 outbox 已撤销，横幅计数必须同步归零。
+    await expect(banner).not.toContainText('待同步');
     await waitForToastToHide(page);
 
     // 第一次离线编辑：100 → 110（此时只剩种子记录）。
@@ -216,7 +216,9 @@ test.describe('E2E 离线（UI-15..16、UI-22）', () => {
     context,
     request,
   }) => {
-    const errors = collectPageErrors(page);
+    // Q-24 §7.4：P1 以对话框出现为准，不以控制台日志判定。
+    // 该场景本身会触发 chunk/CSS 资源加载失败（含 pageerror），
+    // 因此本用例不做 expectNoPageErrors；其余 E2E 仍执行 Q-23 口径。
     // P2 prefetch 是可选能力，且 Q-24 要求 UI-22 不得依赖它。
     // 这里关闭 idle 回调，保证记录页 chunk 在断网前从未被请求；
     // 不能用 page.route 阻断，否则失败的预取会污染浏览器 module map，
@@ -254,7 +256,5 @@ test.describe('E2E 离线（UI-15..16、UI-22）', () => {
     await expect(page.getByTestId('records-page')).toBeVisible({ timeout: 20_000 });
     expect(new URL(page.url()).pathname).toBe('/records');
     await expect(page.getByTestId('records-page')).toContainText('这一天没有记录');
-
-    expectNoPageErrors(errors);
   });
 });
