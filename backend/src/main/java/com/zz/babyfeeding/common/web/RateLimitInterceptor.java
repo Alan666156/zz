@@ -30,7 +30,12 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private static final Duration SYNC_WINDOW = Duration.ofMinutes(1);
 
     private static final String EXPORT_PATH = "/api/v1/exports/feeding-records";
-    private static final String EXPORT_RESERVATION_ATTRIBUTE =
+    /**
+     * Reservation handle shared with {@link ExportQuotaReleaseResolver}: the
+     * resolver rolls the slot back before the error body is rendered, because
+     * {@link #afterCompletion} runs after the response may already be committed.
+     */
+    static final String EXPORT_RESERVATION_ATTRIBUTE =
             RateLimitInterceptor.class.getName() + ".exportReservation";
 
     private final RateLimiter rateLimiter;
@@ -107,6 +112,12 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         }
     }
 
+    /**
+     * Fallback only: by the time completion callbacks run, the error body may
+     * already be flushed and header changes would be silently ignored. The
+     * primary rollback happens in {@link ExportQuotaReleaseResolver} before
+     * rendering; this keeps the quota correct for non-exception 4xx paths.
+     */
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) {
@@ -114,13 +125,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (!(value instanceof ExportReservation reservation)) {
             return;
         }
+        // Removing the handle makes the rollback idempotent: the resolver and
+        // this callback can never decrement the same reservation twice.
         request.removeAttribute(EXPORT_RESERVATION_ATTRIBUTE);
         int status = response.getStatus();
         if (ex == null && status >= 200 && status < 300) {
             return;
         }
         long remaining = rateLimiter.release(reservation.key(), reservation.limit());
-        if (remaining >= 0) {
+        if (remaining >= 0 && !response.isCommitted()) {
             // Failure: the quota is back to its pre-request value (Q-20).
             response.setHeader("X-RateLimit-Limit", String.valueOf(reservation.limit()));
             response.setHeader("X-RateLimit-Remaining", String.valueOf(remaining));
@@ -172,6 +185,6 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 && path.startsWith("/api/v1/exports/feeding-records/");
     }
 
-    private record ExportReservation(String key, int limit) {
+    record ExportReservation(String key, int limit) {
     }
 }
