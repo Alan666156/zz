@@ -357,6 +357,42 @@ export const useBabyStore = defineStore('baby', {
       return this.updateBaby(id, { isDefault: true })
     },
 
+    /**
+     * 记录缓存与记录级 outbox 只能在宝宝删除不可逆确认后清理（N-1）。
+     * 单步本地存储失败不阻断删除，但必须显式降级（N-2）。
+     */
+    async purgeBabyLocalData(id: string): Promise<void> {
+      try {
+        await deleteBabyCache(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await deleteFeedingRecordsByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await deleteGrowthRecordsByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+      }
+      try {
+        await removeOutboxByBaby(id)
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机同步状态更新失败，稍后会自动重试'
+      }
+    },
+
+    async discardOutboxKey(key: string): Promise<void> {
+      try {
+        await removeOutbox(key)
+      } catch {
+        this.cacheDegraded = true
+      }
+    },
+
     async removeBaby(id: string): Promise<void> {
       const current = this.babies.find((baby) => baby.id === id)
       if (!current) return
@@ -373,11 +409,6 @@ export const useBabyStore = defineStore('baby', {
         }
       }
       this.ensureActive()
-      await deleteBabyCache(id)
-      await deleteFeedingRecordsByBaby(id)
-      await deleteGrowthRecordsByBaby(id)
-      // 记录缓存已删，对应的 feeding/growth outbox 也必须清掉，否则联网后会被判 REJECTED（FE-07）
-      await removeOutboxByBaby(id)
       try {
         await replaceBabiesCache(this.babies)
       } catch {
@@ -386,35 +417,59 @@ export const useBabyStore = defineStore('baby', {
       }
 
       const key = outboxKey('BABY', id)
-      // 本地新建尚未同步：直接撤销，无需通知服务端
+      // 本地新建尚未同步：宝宝及其记录都不可能到达服务端，删除是最终状态
       if (current.revision === 0) {
-        await removeOutbox(key)
+        await this.discardOutboxKey(key)
+        await this.purgeBabyLocalData(id)
         return
       }
 
       try {
         await deleteBabyRequest(id, current.revision)
-        await removeOutbox(key)
+        // 在线 DELETE 已确认（2xx）：此时记录/outbox 的清理不可逆
+        await this.discardOutboxKey(key)
+        await this.purgeBabyLocalData(id)
         this.lastError = null
         // 删除默认宝宝时服务端会提升另一个宝宝并递增其 revision，重新拉取对齐（FE-06）
         if (current.isDefault) await this.refreshFromServer()
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
-          await removeOutbox(key)
+          // 服务端已不存在，视同删除成功
+          await this.discardOutboxKey(key)
+          await this.purgeBabyLocalData(id)
           return
         }
         if (!isRetryableApiError(error)) {
+          // 409 CONFLICT / 其他 4xx：宝宝恢复，记录缓存与 outbox 必须原样保留（N-1）
           this.babies = snapshot
           this.ensureActive()
-          await replaceBabiesCache(snapshot)
+          try {
+            await replaceBabiesCache(snapshot)
+          } catch {
+            this.cacheDegraded = true
+            this.lastError = '本机缓存写入失败，数据仅在当前页面保留'
+          }
           throw error
         }
-        await enqueueOutbox({
-          entityType: 'BABY',
-          entityId: id,
-          op: 'DELETE',
-          baseRevision: current.revision,
-        })
+        try {
+          await enqueueOutbox({
+            entityType: 'BABY',
+            entityId: id,
+            op: 'DELETE',
+            baseRevision: current.revision,
+          })
+        } catch {
+          // 删除没有进入队列就不能假装成功，恢复宝宝并保留记录
+          this.babies = snapshot
+          this.ensureActive()
+          try {
+            await replaceBabiesCache(snapshot)
+          } catch {
+            this.cacheDegraded = true
+          }
+          throw new Error('删除失败，请检查浏览器存储空间后重试')
+        }
+        // 挂起的 BABY DELETE 会阻止该宝宝名下记录参与推送（待删除确认后再清理）
         this.lastError = errorMessage(error, '网络异常，删除将在联网后同步')
         requestSync()
       }

@@ -2,10 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
 import { SYNC_BATCH_PLAN_META_KEY } from '@/constants/sync'
-import { getBabiesCache, getMeta, putBabyCache, setMeta } from '@/db'
+import {
+  getBabiesCache,
+  getFeedingRecordCache,
+  getMeta,
+  putBabyCache,
+  putFeedingRecordCache,
+  setMeta,
+} from '@/db'
 import { enqueueOutbox, getOutboxItem, listOutbox, outboxKey } from '@/db/outbox'
 import { useBabyStore } from '@/stores/baby'
-import type { Baby } from '@/types/models'
+import type { Baby, FeedingRecord } from '@/types/models'
 
 const apiMocks = vi.hoisted(() => ({
   fetchBabies: vi.fn(),
@@ -15,6 +22,28 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/babies', () => apiMocks)
+
+function makeFeedingRecord(babyId: string): FeedingRecord {
+  return {
+    id: 'feed-a',
+    babyId,
+    feedType: 'FORMULA',
+    breastSide: null,
+    amountValue: 120,
+    amountUnit: 'ML',
+    durationSec: null,
+    startedAt: '2026-10-26T08:00:00+08:00',
+    endedAt: null,
+    recordDate: '2026-10-26',
+    tzOffsetMinutes: 480,
+    note: null,
+    tags: null,
+    revision: 0,
+    createdAt: '2026-10-26T00:00:00.000Z',
+    updatedAt: '2026-10-26T00:00:00.000Z',
+    deletedAt: null,
+  }
+}
 
 function makeBaby(partial: Partial<Baby> = {}): Baby {
   return {
@@ -262,5 +291,80 @@ describe('baby store', () => {
 
     expect((await listOutbox()).map((item) => item.entityId)).toEqual(['feed-b'])
     expect(await getMeta(SYNC_BATCH_PLAN_META_KEY)).toBeUndefined()
+  })
+
+  it('在线删除 409 冲突：宝宝恢复，记录缓存与 outbox 原样保留（N-1）', async () => {
+    const babyA = makeBaby({ id: 'a', name: 'A', isDefault: false, revision: 1 })
+    const babyB = makeBaby({ id: 'b', name: 'B', isDefault: true, revision: 1 })
+    apiMocks.deleteBabyRequest.mockRejectedValue(new ApiError('CONFLICT', 409, '宝宝已被修改'))
+    const store = useBabyStore()
+    store.babies = [babyB, babyA]
+    const record = makeFeedingRecord('a')
+    await putFeedingRecordCache(record)
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { babyId: 'a' },
+      babyId: 'a',
+    })
+
+    await expect(store.removeBaby('a')).rejects.toThrow('宝宝已被修改')
+
+    expect(store.babies.map((baby) => baby.id)).toContain('a')
+    expect(await getFeedingRecordCache(record.id)).toBeDefined()
+    expect((await listOutbox()).some((item) => item.entityId === record.id)).toBe(true)
+  })
+
+  it('在线删除返回 404：视同确认，清理记录缓存与 outbox（N-1）', async () => {
+    const baby = makeBaby({ id: 'a', name: 'A', revision: 1 })
+    apiMocks.deleteBabyRequest.mockRejectedValue(new ApiError('NOT_FOUND', 404, '不存在'))
+    const store = useBabyStore()
+    store.babies = [baby]
+    const record = makeFeedingRecord('a')
+    await putFeedingRecordCache(record)
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { babyId: 'a' },
+      babyId: 'a',
+    })
+
+    await store.removeBaby('a')
+
+    expect(store.babies).toHaveLength(0)
+    expect(await getFeedingRecordCache(record.id)).toBeUndefined()
+    expect((await listOutbox()).some((item) => item.entityId === record.id)).toBe(false)
+  })
+
+  it('离线删除已同步宝宝：确认前记录缓存与 outbox 都保留（N-1）', async () => {
+    const babyA = makeBaby({ id: 'a', name: 'A', isDefault: false, revision: 1 })
+    const babyB = makeBaby({ id: 'b', name: 'B', isDefault: true, revision: 1 })
+    apiMocks.deleteBabyRequest.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
+    const store = useBabyStore()
+    store.babies = [babyB, babyA]
+    const record = makeFeedingRecord('a')
+    await putFeedingRecordCache(record)
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { babyId: 'a' },
+      babyId: 'a',
+    })
+
+    await store.removeBaby('a')
+
+    expect(store.babies.map((baby) => baby.id)).not.toContain('a')
+    expect(await getFeedingRecordCache(record.id)).toBeDefined()
+    const items = await listOutbox()
+    expect(items.map((item) => item.key)).toEqual(
+      expect.arrayContaining([outboxKey('BABY', 'a'), outboxKey('FEEDING_RECORD', record.id)]),
+    )
+    expect(items.find((item) => item.entityType === 'BABY')?.op).toBe('DELETE')
   })
 })
