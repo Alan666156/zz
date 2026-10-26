@@ -7,7 +7,7 @@ import {
   MAX_TAGS,
   type FeedingTag,
 } from '@/types/models'
-import { toLocalDateString, toUtcDateString } from './date'
+import { toLocalDateString, todayUtcDate } from './date'
 
 // 昵称/备注禁止控制字符，这是有意的安全校验
 // eslint-disable-next-line no-control-regex
@@ -38,11 +38,18 @@ export function validateBabyName(raw: string, allowEmpty = false): string | null
  * 必须用 UTC 日期而非本地“今天”：UTC+14 时本地已跨天，用本地会放宽到 UTC+2 被服务端 400。
  */
 export function babyBirthDateBounds(now: Date = new Date()): { min: string; max: string } {
-  const utcToday = toUtcDateString(now)
+  const utcToday = todayUtcDate(now)
   const [year, month, day] = utcToday.split('-').map((part) => Number(part))
-  const minDate = new Date(Date.UTC(year - 3, month - 1, day - 1))
-  const maxDate = new Date(Date.UTC(year, month - 1, day + 1))
-  return { min: toUtcDateString(minDate), max: toUtcDateString(maxDate) }
+
+  // 用 UTC 日历运算（setUTCFullYear/setUTCDate），避免本地 DST 影响
+  const maxDate = new Date(Date.UTC(year, month - 1, day))
+  maxDate.setUTCDate(maxDate.getUTCDate() + 1)
+
+  const minDate = new Date(Date.UTC(year, month - 1, day))
+  minDate.setUTCFullYear(minDate.getUTCFullYear() - 3)
+  minDate.setUTCDate(minDate.getUTCDate() - 1)
+
+  return { min: todayUtcDate(minDate), max: todayUtcDate(maxDate) }
 }
 
 export function validateBirthDate(value: string, now: Date = new Date()): string | null {

@@ -29,6 +29,13 @@ function record(overrides: Partial<GrowthRecord>): GrowthRecord {
 
 const NOW = new Date('2026-10-26T12:00:00.000Z')
 
+/** 对 YYYY-MM-DD 做 UTC 日历加减，测试内推导期望值，不依赖运行机器时区 */
+function utcShift(dateText: string, days: number): string {
+  const date = new Date(`${dateText}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 describe('growth utils', () => {
   it('校验范围、精度与至少一项指标', () => {
     expect(
@@ -92,17 +99,44 @@ describe('growth utils', () => {
   })
 
   it('本地日期已跨天时，measurement 上限仍按 UTC 今天 +1（Q-11）', () => {
-    // UTC 日期 2026-10-26，模拟本地已是 2026-10-27（如 UTC+14）
-    const now = new Date('2026-10-26T20:00:00.000Z')
+    // UTC 日期 2026-10-26，UTC+8 本地已是 10-27
+    const now = new Date('2026-10-26T17:00:00.000Z')
+    const utcToday = now.toISOString().slice(0, 10)
+    const expectedMax = utcShift(utcToday, 1)
+
+    expect(
+      validateGrowthInput({ measuredOn: expectedMax, weightKg: 8 }, '2026-03-01', now),
+    ).toBeNull()
+    // 误用本地今天会放行 UTC+2 天
+    expect(
+      validateGrowthInput(
+        { measuredOn: utcShift(utcToday, 2), weightKg: 8 },
+        '2026-03-01',
+        now,
+      ),
+    ).toContain('允许范围')
+  })
+
+  it('本地日期被人为放大一天时，measurement 上限不跟随本地（Q-11）', () => {
+    const now = new Date('2026-10-26T16:30:00.000Z')
     Object.defineProperty(now, 'getFullYear', { value: () => 2026 })
     Object.defineProperty(now, 'getMonth', { value: () => 9 })
     Object.defineProperty(now, 'getDate', { value: () => 27 })
 
+    const utcToday = now.toISOString().slice(0, 10)
     expect(
-      validateGrowthInput({ measuredOn: '2026-10-27', weightKg: 8 }, '2026-03-01', now),
+      validateGrowthInput(
+        { measuredOn: utcShift(utcToday, 1), weightKg: 8 },
+        '2026-03-01',
+        now,
+      ),
     ).toBeNull()
     expect(
-      validateGrowthInput({ measuredOn: '2026-10-28', weightKg: 8 }, '2026-03-01', now),
+      validateGrowthInput(
+        { measuredOn: utcShift(utcToday, 2), weightKg: 8 },
+        '2026-03-01',
+        now,
+      ),
     ).toContain('允许范围')
   })
 

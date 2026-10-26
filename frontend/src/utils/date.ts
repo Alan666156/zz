@@ -10,11 +10,11 @@ export function toLocalDateString(date: Date = new Date()): string {
 }
 
 /**
- * UTC 日期 YYYY-MM-DD。
+ * UTC 今天 YYYY-MM-DD。
  * 服务端 `serverToday` 按 UTC 判定，客户端 Q-11 日期上下限必须同口径。
  */
-export function toUtcDateString(date: Date = new Date()): string {
-  return date.toISOString().slice(0, 10)
+export function todayUtcDate(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10)
 }
 
 /** 客户端时区偏移，例如东八区 +480 */

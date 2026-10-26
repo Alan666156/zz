@@ -5,7 +5,7 @@ import {
   formatDuration,
   toLocalDateString,
   toOffsetISOString,
-  toUtcDateString,
+  todayUtcDate,
   tzOffsetMinutes,
 } from '@/utils/date'
 
@@ -14,9 +14,11 @@ describe('date utils', () => {
     expect(toLocalDateString(new Date(2026, 0, 2))).toBe('2026-01-02')
   })
 
-  it('toUtcDateString 使用 UTC 日期（Q-11 服务端口径）', () => {
-    expect(toUtcDateString(new Date('2026-10-26T23:30:00.000Z'))).toBe('2026-10-26')
-    expect(toUtcDateString(new Date('2026-10-26T00:30:00.000Z'))).toBe('2026-10-26')
+  it('todayUtcDate 使用 UTC 日期（Q-11 服务端口径）', () => {
+    // UTC+8 下本地已是 10-27，但 UTC 仍是 10-26
+    expect(todayUtcDate(new Date('2026-10-26T17:00:00.000Z'))).toBe('2026-10-26')
+    expect(todayUtcDate(new Date('2026-10-26T23:30:00.000Z'))).toBe('2026-10-26')
+    expect(todayUtcDate(new Date('2026-10-26T00:30:00.000Z'))).toBe('2026-10-26')
   })
 
   it('toOffsetISOString 带时区偏移且可回解析', () => {
