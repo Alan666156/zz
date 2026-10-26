@@ -129,7 +129,10 @@ async function planBatch(
 ): Promise<{ batchId: string; clientTime: string; items: OutboxItem[] } | null> {
   const plan = await getMeta<SyncBatchPlan>(SYNC_BATCH_PLAN_META_KEY)
   if (plan) {
-    const byKey = new Map(available.map((item) => [item.key, item]))
+    // 退避中的条目不在 listSyncableOutbox() 里，必须用完整 outbox 判断批次是否完整，
+    // 否则退避窗口内会误判「内容变化」而丢掉 batchId。
+    const allItems = await listOutbox().catch(() => available)
+    const byKey = new Map(allItems.map((item) => [item.key, item]))
     const items = plan.keys
       .map((key) => byKey.get(key))
       .filter((item): item is OutboxItem => Boolean(item))
@@ -138,7 +141,12 @@ async function planBatch(
       items.length > 0 &&
       items.length <= BATCH_SIZE &&
       batchFingerprint(items.map(toChange)) === plan.fingerprint
-    if (intact) return { batchId: plan.batchId, clientTime: plan.clientTime, items }
+    if (intact) {
+      // 批次里仍有条目在退避窗口：本轮不发，保留 batchId/clientTime，等全部到期后原样重放
+      const allDue = items.every((item) => item.nextRetryAt <= nowIso)
+      if (!allDue) return null
+      return { batchId: plan.batchId, clientTime: plan.clientTime, items }
+    }
     await deleteMeta(SYNC_BATCH_PLAN_META_KEY)
   }
 

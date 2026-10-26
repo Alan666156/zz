@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
 import {
   getFeedingRecordCache,
+  getMeta,
   putFeedingRecordCache,
   putGrowthRecordCache,
 } from '@/db'
@@ -401,6 +402,53 @@ describe('sync store', () => {
     expect(retryPayload.clientTime).toBe(firstPayload.clientTime)
     expect(await getOutboxItem(outboxKey('FEEDING_RECORD', record.id))).toBeUndefined()
     expect(sync.failedCount).toBe(0)
+  })
+
+  it('退避窗口内 syncNow 不丢计划，batchId/clientTime 保持不变', async () => {
+    const record = localFeeding('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+    await seedFeedingOutbox(record)
+    const sync = useSyncStore()
+
+    syncMocks.pushSyncBatch.mockRejectedValueOnce(
+      new ApiError('NETWORK_ERROR', 0, '网络不可用'),
+    )
+    await sync.syncNow()
+    const planBefore = await getMeta<{ batchId: string; clientTime: string }>(
+      'sync.batchPlan',
+    )
+    expect(planBefore?.batchId).toBeTruthy()
+    const callsAfterFailure = syncMocks.pushSyncBatch.mock.calls.length
+
+    // 退避未到期时新增另一条记录：旧计划不能被挤掉或换 batchId
+    const another = localFeeding('cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    await seedFeedingOutbox(another)
+    await sync.syncNow()
+    expect(syncMocks.pushSyncBatch).toHaveBeenCalledTimes(callsAfterFailure)
+    const planAfter = await getMeta<{ batchId: string; clientTime: string }>(
+      'sync.batchPlan',
+    )
+    expect(planAfter?.batchId).toBe(planBefore?.batchId)
+    expect(planAfter?.clientTime).toBe(planBefore?.clientTime)
+
+    // 旧条目重新到期后，用原批次原样重放（只含原批次记录）
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: record.revision,
+      data: toFeedingSyncData(record),
+    })
+    mockApplied()
+    await sync.syncNow()
+
+    const replay = syncMocks.pushSyncBatch.mock.calls[callsAfterFailure][0] as {
+      batchId: string
+      clientTime: string
+      changes: Change[]
+    }
+    expect(replay.batchId).toBe(planBefore?.batchId)
+    expect(replay.clientTime).toBe(planBefore?.clientTime)
+    expect(replay.changes.map((change) => change.id)).toEqual([record.id])
   })
 
   it('失败后内容被修改则视为新尝试，换用新 batchId', async () => {
