@@ -107,7 +107,8 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 ### 触发点与退避
 
-- 触发：应用启动、`online` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入遇到可重试错误后的 `requestSync()`。
+- 触发：应用启动、`online` / `offline` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入（含离线写入）与可重试错误后的 `requestSync()`。
+- 离线计数：`runSync()` 先执行 `refreshPending()`（只读 IndexedDB，不发请求）再判断在线状态，离线新增/编辑/删除后横幅「待同步 N 条」立即更新；离线不进入 `syncNow()`。
 - 批量：`POST /api/v1/sync/push`，每批 1–50 条，`BABY` 优先、同类型按 `createdAt` 升序。
 - 批次幂等：每次**新尝试**生成新 `batchId`；网络/5xx/429 失败后把 `{batchId, keys, fingerprint}` 存入 IndexedDB `meta` 的 `sync.batchPlan`，下一轮内容未变时复用同一 `batchId` 与同一批记录重试，命中服务端 24h 缓存（`replayed:true`）。内容被编辑/删除/新增，或已收到服务端结果，则丢弃计划并生成新 `batchId`。
 - 退避：1s / 2s / 5s / 15s / 60s / 5min，±20% 抖动；429/409 优先遵守 `Retry-After`。
@@ -308,6 +309,7 @@ ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页
 - 不使用 `structuredClone`（WebView 版本覆盖不足），写入 IndexedDB 前统一 JSON 拷贝（`toPlain`）。
 - 时间一律用本地时区字符串与 `tzOffsetMinutes` 表达；日期上下限按服务端 `serverToday = UTC 今天` 计算并允许 ±1 天容差（Q-11）：`birthDate ∈ [utcToday-3年-1天, utcToday+1天]`，`measuredOn ∈ [birthDate, utcToday+1天]`。`utils/date.ts` 的 `todayUtcDate()` 是唯一口径来源，禁止用本地“今天”卡范围；上下限用 `setUTCFullYear`/`setUTCDate` 做 UTC 日历运算，避免本地 DST 影响。
 - 设备 UUID 存储与请求头统一小写（Q-13），历史大写值读取时归一化。
+- 站点图标：`public/favicon.svg`（内联矢量、≤2KB、无外部 CDN），`index.html` 用 `<link rel="icon" type="image/svg+xml" href="/favicon.svg">` 引用；`vite build` 会原样复制到 `dist/favicon.svg`，避免浏览器回退请求 `/favicon.ico` 产生 404 控制台错误。
 
 ### 已知限制
 

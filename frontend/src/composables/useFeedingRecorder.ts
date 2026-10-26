@@ -1,5 +1,6 @@
 import { useFeedingStore } from '@/stores/feeding'
 import { useSyncStore } from '@/stores/sync'
+import { requestSync } from '@/utils/sync-events'
 import type { FeedingRecord, FeedingRecordInput } from '@/types/models'
 
 export interface UseFeedingRecorder {
@@ -19,7 +20,10 @@ export function useFeedingRecorder(): UseFeedingRecorder {
   async function save(input: FeedingRecordInput, babyId: string): Promise<FeedingRecord> {
     const record = await store.createLocal(input, babyId)
     const offline = typeof navigator !== 'undefined' && navigator.onLine === false
-    if (!offline) {
+    if (offline) {
+      // 离线不推送，但要通知同步层刷新 outbox 计数（横幅「待同步 N 条」）
+      requestSync()
+    } else {
       void sync.syncNow()
     }
     return record

@@ -232,6 +232,7 @@ export const useGrowthStore = defineStore('growth', {
       await this.refreshPendingCount()
 
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        requestSync()
         return { status: 'pending', record, message: '离线，记录待同步' }
       }
       return this.syncRecord(record)
@@ -270,6 +271,7 @@ export const useGrowthStore = defineStore('growth', {
       await this.refreshPendingCount()
 
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        requestSync()
         return { status: 'pending', record: updated, message: '离线，修改待同步' }
       }
       if (record.revision === 0) {
@@ -333,6 +335,7 @@ export const useGrowthStore = defineStore('growth', {
         return { status: 'synced' }
       }
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        requestSync()
         return { status: 'pending', message: '离线，删除待同步' }
       }
 
