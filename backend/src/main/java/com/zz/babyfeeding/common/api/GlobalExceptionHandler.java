@@ -2,6 +2,7 @@ package com.zz.babyfeeding.common.api;
 
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
+import com.zz.babyfeeding.common.web.LogSanitizer;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -49,11 +50,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Object>> handleBusiness(
             BusinessException ex, HttpServletRequest request) {
         ErrorCode code = ex.getErrorCode();
+        String path = LogSanitizer.path(request.getRequestURI());
         if (code.getStatus().is5xxServerError()) {
-            log.error("business error code={} path={}", code.getCode(), request.getRequestURI(), ex);
+            log.error("business error code={} path={}", code.getCode(), path, ex);
         } else {
             log.warn("business error code={} path={} message={}",
-                    code.getCode(), request.getRequestURI(), ex.getMessage());
+                    code.getCode(), path, ex.getMessage());
         }
         HttpHeaders headers = new HttpHeaders();
         if (ex.getRetryAfterSeconds() != null) {
@@ -111,7 +113,8 @@ public class GlobalExceptionHandler {
         if (typeMismatch != null) {
             return validationResponse(List.of(typeMismatch), request);
         }
-        log.warn("unreadable request body path={}", request.getRequestURI());
+        log.warn("unreadable request body path={}",
+                LogSanitizer.path(request.getRequestURI()));
         return build(ErrorCode.BAD_REQUEST, "请求体格式错误或 JSON 无法解析", null, new HttpHeaders());
     }
 
@@ -168,7 +171,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Object>> handleIntegrity(
             DataIntegrityViolationException ex, HttpServletRequest request) {
-        log.warn("data integrity violation path={}", request.getRequestURI());
+        log.warn("data integrity violation path={}",
+                LogSanitizer.path(request.getRequestURI()));
         return build(ErrorCode.CONFLICT, "数据冲突，请重试", null, new HttpHeaders());
     }
 
@@ -176,7 +180,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Object>> handleUnexpected(
             Exception ex, HttpServletRequest request) {
         log.error("unexpected error path={} requestId={}",
-                request.getRequestURI(), org.slf4j.MDC.get("requestId"), ex);
+                LogSanitizer.path(request.getRequestURI()),
+                org.slf4j.MDC.get("requestId"), ex);
         return build(ErrorCode.INTERNAL_ERROR, null, null, new HttpHeaders());
     }
 
@@ -218,7 +223,8 @@ public class GlobalExceptionHandler {
 
     private static ResponseEntity<ApiResponse<Object>> validationResponse(
             List<FieldErrorItem> errors, HttpServletRequest request) {
-        log.warn("validation failed path={} fields={}", request.getRequestURI(),
+        log.warn("validation failed path={} fields={}",
+                LogSanitizer.path(request.getRequestURI()),
                 errors.stream().map(FieldErrorItem::field).toList());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("fieldErrors", errors);

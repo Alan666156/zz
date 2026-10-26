@@ -1,8 +1,13 @@
 package com.zz.babyfeeding.export;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.zz.babyfeeding.common.api.GlobalExceptionHandler;
 import com.zz.babyfeeding.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -569,6 +574,43 @@ class ExportIntegrationTest extends IntegrationTestBase {
                 .containsExactly("no-store");
         assertThat(file.getResponse().getHeader("X-Content-Type-Options"))
                 .isEqualTo("nosniff");
+    }
+
+    /** FIX-BE-04: the signed token must never reach the error log. */
+    @Test
+    void errorLogsNeverContainTheRawDownloadToken() throws Exception {
+        String deviceId = newDeviceId();
+        String babyId = setupDeviceAndBaby(deviceId);
+        JsonNode ticket = requestExport(deviceId, babyId, DAY, DAY);
+        String token = tokenOf(ticket.path("downloadUrl").asText());
+        String payloadPart = token.substring(0, token.lastIndexOf('.'));
+        String signaturePart = token.substring(token.lastIndexOf('.') + 1);
+        char tamperedChar = signaturePart.charAt(0) == 'A' ? 'B' : 'A';
+        String tampered = payloadPart + "." + tamperedChar + signaturePart.substring(1);
+
+        Logger handlerLogger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        handlerLogger.addAppender(appender);
+        try {
+            MvcResult result = mockMvc.perform(get(DOWNLOAD_PREFIX + tampered + ".csv")
+                            .accept(MediaType.parseMediaType("text/csv")))
+                    .andReturn();
+            assertError(result, 403, "EXPORT_TOKEN_INVALID");
+        } finally {
+            handlerLogger.detachAppender(appender);
+            appender.stop();
+        }
+
+        List<String> messages = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage).toList();
+        assertThat(messages).isNotEmpty();
+        assertThat(messages).anySatisfy(message ->
+                assertThat(message).contains("/api/v1/exports/feeding-records/***.csv"));
+        assertThat(messages).noneSatisfy(message ->
+                assertThat(message).contains(token));
+        assertThat(messages).noneSatisfy(message ->
+                assertThat(message).contains(tampered));
     }
 
     private static void assertJsonError(MvcResult result) {
