@@ -8,6 +8,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -265,6 +266,18 @@ class BabyIntegrationTest extends IntegrationTestBase {
 
         assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId,
                 Map.of("name", "缺版本号")), "baseRevision");
+
+        // Explicit null is not "absent": required fields cannot be nulled out.
+        Map<String, Object> nullName = new HashMap<>();
+        nullName.put("baseRevision", 1);
+        nullName.put("name", null);
+        assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId, nullName), "name");
+        Map<String, Object> nullBirthDate = new HashMap<>();
+        nullBirthDate.put("baseRevision", 1);
+        nullBirthDate.put("birthDate", null);
+        assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId, nullBirthDate),
+                "birthDate");
+
         assertFieldError(deleteJson("/api/v1/babies/" + babyId, deviceId), "baseRevision");
         assertFieldError(getJson("/api/v1/babies/not-a-uuid", deviceId), "babyId");
         assertFieldError(getJson("/api/v1/babies/" + babyId.toUpperCase(Locale.ROOT), deviceId),

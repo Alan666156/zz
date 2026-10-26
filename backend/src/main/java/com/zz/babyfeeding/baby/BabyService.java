@@ -134,7 +134,8 @@ public class BabyService {
     @Transactional
     public BabyResponse patch(DeviceContext.Identity device, String babyId,
                               PatchBabyRequest request) {
-        BabyValidator.requireBaseRevision(request.baseRevision());
+        Integer baseRevision = request.getBaseRevision();
+        BabyValidator.requireBaseRevision(baseRevision);
         requireUuid(babyId);
 
         deviceMapper.lockById(device.deviceRowId());
@@ -142,24 +143,27 @@ public class BabyService {
         if (current == null) {
             throw BabyValidator.notFound();
         }
-        if (!request.baseRevision().equals(current.getRevision())) {
+        if (!baseRevision.equals(current.getRevision())) {
             throw conflict(current);
         }
 
-        String name = request.name() == null
-                ? current.getName() : BabyValidator.normalizeName(request.name());
-        String gender = request.gender() == null
-                ? current.getGender() : BabyValidator.normalizeGender(request.gender());
-        LocalDate birthDate = request.birthDate() == null
-                ? current.getBirthDate() : request.birthDate();
-        if (request.birthDate() != null) {
+        // Absent fields stay unchanged; explicit null for a required field is
+        // rejected (contract 4.5). presence flags are set by Jackson.
+        String name = request.isNamePresent()
+                ? BabyValidator.normalizeName(request.getName()) : current.getName();
+        String gender = request.isGenderPresent() && request.getGender() != null
+                ? BabyValidator.normalizeGender(request.getGender()) : current.getGender();
+        LocalDate birthDate = request.isBirthDatePresent()
+                ? request.getBirthDate() : current.getBirthDate();
+        if (request.isBirthDatePresent()) {
             BabyValidator.validateBirthDate(birthDate, TimeUtils.todayUtc());
         }
 
         boolean currentlyDefault = Boolean.TRUE.equals(current.getIsDefault());
-        boolean newDefault = request.isDefault() == null
-                ? currentlyDefault : request.isDefault();
-        if (currentlyDefault && request.isDefault() != null && !request.isDefault()) {
+        Boolean requestedDefault = request.getIsDefault();
+        boolean newDefault = request.isDefaultPresent() && requestedDefault != null
+                ? requestedDefault : currentlyDefault;
+        if (currentlyDefault && Boolean.FALSE.equals(requestedDefault)) {
             throw new BusinessException(ErrorCode.DEFAULT_BABY_REQUIRED);
         }
 
@@ -172,12 +176,12 @@ public class BabyService {
         update.eq(BabyEntity::getId, babyId)
                 .eq(BabyEntity::getDeviceId, device.deviceRowId())
                 .isNull(BabyEntity::getDeletedAt)
-                .eq(BabyEntity::getRevision, request.baseRevision())
+                .eq(BabyEntity::getRevision, baseRevision)
                 .set(BabyEntity::getName, name)
                 .set(BabyEntity::getGender, gender)
                 .set(BabyEntity::getBirthDate, birthDate)
                 .set(BabyEntity::getIsDefault, newDefault)
-                .set(BabyEntity::getRevision, request.baseRevision() + 1)
+                .set(BabyEntity::getRevision, baseRevision + 1)
                 .set(BabyEntity::getUpdatedAt, now);
 
         if (babyMapper.update(null, update) == 0) {
