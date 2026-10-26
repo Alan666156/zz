@@ -102,7 +102,11 @@ onBeforeUnmount(() => {
     <template v-if="activeBaby">
       <BabyCard :baby="activeBaby" active @click="showSwitcher = true" />
       <DailySummaryCard :summary="feedingStore.todaySummary" :loading="feedingStore.loading" />
-      <FeedingTimeline :records="feedingStore.sortedRecords" :loading="feedingStore.loading" />
+      <FeedingTimeline
+        :records="feedingStore.sortedRecords"
+        :loading="feedingStore.loading"
+        :pending-ids="feedingStore.pendingIds"
+      />
       <QuickRecordFab @click="showRecord = true" />
     </template>
 

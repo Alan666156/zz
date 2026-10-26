@@ -7,15 +7,25 @@ withDefaults(
   defineProps<{
     records: FeedingRecord[]
     loading?: boolean
+    pendingIds?: string[]
+    title?: string
+    emptyTitle?: string
+    emptyDescription?: string
   }>(),
-  { loading: false },
+  {
+    loading: false,
+    pendingIds: () => [],
+    title: '今日记录',
+    emptyTitle: '今天还没有记录',
+    emptyDescription: '点击右下角的 +，快速记录一次喂养。',
+  },
 )
 </script>
 
 <template>
-  <section class="timeline">
+  <section class="timeline" data-testid="feeding-timeline">
     <div class="section-title flex-between">
-      <span>今日记录</span>
+      <span>{{ title }}</span>
       <span class="timeline__count text-secondary">{{ records.length }} 条</span>
     </div>
 
@@ -24,12 +34,18 @@ withDefaults(
     <EmptyState
       v-else-if="records.length === 0"
       class="card"
-      title="今天还没有记录"
-      description="点击右下角的 +，快速记录一次喂养。"
+      :title="emptyTitle"
+      :description="emptyDescription"
     />
 
     <div v-else class="card timeline__list">
-      <FeedingRecordItem v-for="record in records" :key="record.id" :record="record" />
+      <div v-for="record in records" :key="record.id" class="timeline__row">
+        <FeedingRecordItem
+          :record="record"
+          :pending="pendingIds.includes(record.id)"
+        />
+        <slot name="actions" :record="record"></slot>
+      </div>
     </div>
   </section>
 </template>
@@ -49,5 +65,16 @@ withDefaults(
 .timeline__list {
   padding-top: 2px;
   padding-bottom: 2px;
+}
+
+.timeline__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.timeline__row :deep(.record-item) {
+  min-width: 0;
+  flex: 1;
 }
 </style>

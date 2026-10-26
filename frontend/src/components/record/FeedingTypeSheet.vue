@@ -25,6 +25,7 @@ const options = (Object.keys(FEEDING_TYPE_LABELS) as FeedingType[]).map((value) 
       class="type-switch__item"
       :class="{ 'type-switch__item--active': option.value === modelValue }"
       :aria-selected="option.value === modelValue"
+      :data-testid="`feeding-type-tab-${option.value.toLowerCase()}`"
       @click="emit('update:modelValue', option.value)"
     >
       {{ option.label }}

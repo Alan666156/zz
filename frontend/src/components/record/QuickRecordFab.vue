@@ -5,7 +5,13 @@ defineEmits<{
 </script>
 
 <template>
-  <button class="quick-fab" type="button" aria-label="快速记录喂养" @click="$emit('click')">
+  <button
+    class="quick-fab"
+    type="button"
+    aria-label="快速记录喂养"
+    data-testid="quick-record-fab"
+    @click="$emit('click')"
+  >
     <span class="quick-fab__plus" aria-hidden="true">+</span>
   </button>
 </template>

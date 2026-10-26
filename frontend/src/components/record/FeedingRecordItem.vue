@@ -10,9 +10,11 @@ import { formatDuration, formatTimeOfDay } from '@/utils/date'
 
 const props = defineProps<{
   record: FeedingRecord
+  pending?: boolean
 }>()
 
 const typeLabel = computed(() => FEEDING_TYPE_LABELS[props.record.feedType])
+const isPending = computed(() => props.pending ?? props.record.revision === 0)
 
 const detail = computed(() => {
   const record = props.record
@@ -21,7 +23,7 @@ const detail = computed(() => {
     parts.push(BREAST_SIDE_LABELS[record.breastSide])
   }
   if (record.amountValue !== null && record.amountUnit) {
-    parts.push(`${record.amountValue} ${record.amountUnit === 'ML' ? 'ml' : 'g'}`)
+    parts.push(`${record.amountValue} ${record.amountUnit === 'ML' ? '毫升' : '克'}`)
   }
   const duration = formatDuration(record.durationSec)
   if (duration) parts.push(duration)
@@ -34,13 +36,20 @@ const tagList = computed(() =>
 </script>
 
 <template>
-  <article class="record-item">
+  <article class="record-item" data-testid="feeding-record-item">
     <span class="record-item__time">{{ formatTimeOfDay(record.startedAt) }}</span>
     <span class="record-item__dot" :class="`record-item__dot--${record.feedType.toLowerCase()}`"></span>
     <div class="record-item__body">
       <div class="record-item__title-row">
         <span class="record-item__title">{{ typeLabel }}</span>
-        <van-tag v-if="record.revision === 0" color="#fff7e6" text-color="#ad6800">待同步</van-tag>
+        <van-tag
+          v-if="isPending"
+          data-testid="record-pending"
+          color="#fff7e6"
+          text-color="#ad6800"
+        >
+          待同步
+        </van-tag>
       </div>
       <p class="record-item__detail">{{ detail }}</p>
       <p v-if="record.note" class="record-item__note">{{ record.note }}</p>

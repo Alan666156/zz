@@ -155,7 +155,9 @@ onBeforeUnmount(clearTicker)
       </button>
     </div>
 
-    <div class="timer__display" data-test="timer-display">{{ display }}</div>
+    <div class="timer__display" data-test="timer-display" data-testid="breast-timer-display">
+      {{ display }}
+    </div>
     <p class="timer__status text-secondary">
       {{ running ? '计时中…' : hasStarted ? '已暂停' : '点击开始计时' }}
     </p>
@@ -165,11 +167,19 @@ onBeforeUnmount(clearTicker)
         round
         :type="!hasStarted || running ? 'primary' : 'default'"
         :plain="hasStarted && !running"
+        data-testid="breast-timer-toggle"
         @click="toggle"
       >
         {{ toggleText }}
       </van-button>
-      <van-button v-if="hasStarted" round type="primary" :loading="false" @click="finish">
+      <van-button
+        v-if="hasStarted"
+        round
+        type="primary"
+        :loading="false"
+        data-testid="breast-timer-finish"
+        @click="finish"
+      >
         结束并保存
       </van-button>
     </div>

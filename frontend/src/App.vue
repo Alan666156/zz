@@ -6,5 +6,5 @@ const ui = useUiStore()
 
 <template>
   <router-view />
-  <van-toast v-model:show="ui.toastVisible" :message="ui.toastMessage" />
+  <van-toast v-model:show="ui.toastVisible" :message="ui.toastMessage" data-testid="app-toast" />
 </template>

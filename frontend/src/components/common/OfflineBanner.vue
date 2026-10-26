@@ -6,7 +6,11 @@ defineProps<{
 </script>
 
 <template>
-  <div v-if="!online || (pendingCount ?? 0) > 0" class="offline-banner">
+  <div
+    v-if="!online || (pendingCount ?? 0) > 0"
+    class="offline-banner"
+    data-testid="offline-banner"
+  >
     <template v-if="!online">当前离线，记录会先保存在本机，联网后自动同步</template>
     <template v-else>有 {{ pendingCount }} 条记录待同步</template>
   </div>

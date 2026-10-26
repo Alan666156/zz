@@ -25,6 +25,7 @@ function handleInput(value: string): void {
       :model-value="amount === null ? '' : String(amount)"
       type="number"
       label="辅食量"
+      data-testid="solid-amount-input"
       placeholder="可不填"
       clearable
       @update:model-value="handleInput"

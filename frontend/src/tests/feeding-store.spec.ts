@@ -12,6 +12,8 @@ import type { FeedingRecordInput } from '@/types/models'
 const apiMocks = vi.hoisted(() => ({
   listFeedingRecords: vi.fn(),
   createFeedingRecordRequest: vi.fn(),
+  patchFeedingRecordRequest: vi.fn(),
+  deleteFeedingRecordRequest: vi.fn(),
 }))
 
 vi.mock('@/api/feeding', () => apiMocks)
@@ -34,6 +36,8 @@ describe('feeding store + recorder', () => {
     setActivePinia(createPinia())
     apiMocks.listFeedingRecords.mockReset()
     apiMocks.createFeedingRecordRequest.mockReset()
+    apiMocks.patchFeedingRecordRequest.mockReset()
+    apiMocks.deleteFeedingRecordRequest.mockReset()
     apiMocks.listFeedingRecords.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
   })
 
@@ -76,6 +80,96 @@ describe('feeding store + recorder', () => {
     expect(store.records[0].revision).toBe(1)
     expect(await listOutbox()).toHaveLength(0)
     expect(store.lastError).toBeNull()
+  })
+
+  it('编辑已同步记录：本地立即生效并写回服务端', async () => {
+    const store = useFeedingStore()
+    const today = todayLocalDate()
+    store.currentBabyId = 'baby-1'
+    store.currentDate = today
+    const base = buildLocalFeedingRecord(formulaInput(), 'baby-1')
+    const synced = { ...base, revision: 1 }
+    store.mergeRecords([synced])
+    apiMocks.patchFeedingRecordRequest.mockResolvedValue({
+      ...synced,
+      amountValue: 150,
+      revision: 2,
+    })
+
+    const outcome = await store.updateRecord(synced, { ...formulaInput(), amountValue: 150 })
+
+    expect(outcome.status).toBe('synced')
+    expect(store.records[0].amountValue).toBe(150)
+    expect(store.records[0].revision).toBe(2)
+    expect(await listOutbox()).toHaveLength(0)
+    expect(apiMocks.patchFeedingRecordRequest).toHaveBeenCalledWith(
+      synced.id,
+      expect.objectContaining({ baseRevision: 1, amountValue: 150 }),
+    )
+  })
+
+  it('编辑冲突 409：用服务端 data.current 覆盖并提示', async () => {
+    const store = useFeedingStore()
+    const today = todayLocalDate()
+    store.currentBabyId = 'baby-1'
+    store.currentDate = today
+    const base = buildLocalFeedingRecord(formulaInput(), 'baby-1')
+    const synced = { ...base, revision: 1 }
+    store.mergeRecords([synced])
+    const serverCurrent = { ...synced, amountValue: 200, revision: 2 }
+    apiMocks.patchFeedingRecordRequest.mockRejectedValue(
+      new ApiError('CONFLICT', 409, 'conflict', { current: serverCurrent }),
+    )
+
+    const outcome = await store.updateRecord(synced, { ...formulaInput(), amountValue: 150 })
+
+    expect(outcome.status).toBe('conflict')
+    expect(outcome.message).toBe('该记录已在其他端更新')
+    expect(store.records[0].amountValue).toBe(200)
+    expect(store.records[0].revision).toBe(2)
+    expect(await listOutbox()).toHaveLength(0)
+  })
+
+  it('删除冲突 409：恢复服务端最新记录', async () => {
+    const store = useFeedingStore()
+    const today = todayLocalDate()
+    store.currentBabyId = 'baby-1'
+    store.currentDate = today
+    const base = buildLocalFeedingRecord(formulaInput(), 'baby-1')
+    const synced = { ...base, revision: 1 }
+    store.mergeRecords([synced])
+    apiMocks.deleteFeedingRecordRequest.mockRejectedValue(
+      new ApiError('CONFLICT', 409, 'conflict', { current: { ...synced, revision: 2 } }),
+    )
+
+    const outcome = await store.deleteRecord(synced)
+
+    expect(outcome.status).toBe('conflict')
+    expect(store.records.map((record) => record.id)).toEqual([synced.id])
+    expect(store.records[0].revision).toBe(2)
+    expect(await listOutbox()).toHaveLength(0)
+  })
+
+  it('删除已同步记录成功后清空本地与 outbox', async () => {
+    const store = useFeedingStore()
+    const today = todayLocalDate()
+    store.currentBabyId = 'baby-1'
+    store.currentDate = today
+    const base = buildLocalFeedingRecord(formulaInput(), 'baby-1')
+    const synced = { ...base, revision: 1 }
+    store.mergeRecords([synced])
+    apiMocks.deleteFeedingRecordRequest.mockResolvedValue({
+      id: synced.id,
+      revision: 2,
+      deletedAt: new Date().toISOString(),
+      alreadyDeleted: false,
+    })
+
+    const outcome = await store.deleteRecord(synced)
+
+    expect(outcome.status).toBe('synced')
+    expect(store.records).toHaveLength(0)
+    expect(await listOutbox()).toHaveLength(0)
   })
 
   it('loadDay 合并服务端记录与本地待同步记录', async () => {

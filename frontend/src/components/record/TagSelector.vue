@@ -26,6 +26,7 @@ function toggle(tag: FeedingTag): void {
         class="tags__item"
         :class="{ 'tags__item--active': tags.includes(tag) }"
         :aria-pressed="tags.includes(tag)"
+        :data-testid="`feeding-tag-${tag.toLowerCase()}`"
         @click="toggle(tag)"
       >
         {{ FEEDING_TAG_LABELS[tag] }}

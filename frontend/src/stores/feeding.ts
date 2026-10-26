@@ -1,23 +1,45 @@
 import { defineStore } from 'pinia'
-import { isRetryableApiError } from '@/api/client'
-import { createFeedingRecordRequest, listFeedingRecords } from '@/api/feeding'
+import { ApiError, isRetryableApiError } from '@/api/client'
 import {
+  createFeedingRecordRequest,
+  deleteFeedingRecordRequest,
+  listFeedingRecords,
+  patchFeedingRecordRequest,
+} from '@/api/feeding'
+import {
+  deleteFeedingRecordCache,
   getFeedingRecordsByBabyDate,
   putFeedingRecordCache,
   putFeedingRecordsCache,
 } from '@/db'
-import { countOutbox, enqueueOutbox, outboxKey, removeOutbox } from '@/db/outbox'
+import {
+  countOutbox,
+  enqueueOutbox,
+  listOutbox,
+  outboxKey,
+  removeOutbox,
+} from '@/db/outbox'
 import type {
   DailySummary,
   FeedingRecord,
   FeedingRecordInput,
 } from '@/types/models'
+import { toLocalDateString, tzOffsetMinutes } from '@/utils/date'
 import {
   buildLocalFeedingRecord,
+  normalizeFeedingFields,
   summarizeFeedingRecords,
   toFeedingSyncData,
   validateFeedingInput,
 } from '@/utils/feeding'
+
+export type FeedingMutationStatus = 'synced' | 'pending' | 'conflict' | 'failed'
+
+export interface FeedingMutationOutcome {
+  status: FeedingMutationStatus
+  record?: FeedingRecord
+  message?: string
+}
 
 function byId(records: FeedingRecord[]): FeedingRecord[] {
   const map = new Map<string, FeedingRecord>()
@@ -39,13 +61,49 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+/** 409 CONFLICT 的 data.current 是服务端最新记录 */
+function conflictCurrent(error: unknown): FeedingRecord | null {
+  if (!(error instanceof ApiError) || error.code !== 'CONFLICT') return null
+  const data = error.data as { current?: FeedingRecord | null } | null | undefined
+  return data?.current ?? null
+}
+
+function buildUpdatedRecord(
+  record: FeedingRecord,
+  input: FeedingRecordInput,
+  now: Date = new Date(),
+): FeedingRecord {
+  const fields = normalizeFeedingFields(input)
+  const parsedStart = new Date(input.startedAt)
+  const startDate = Number.isNaN(parsedStart.getTime()) ? new Date(record.startedAt) : parsedStart
+  const safeStart = Number.isNaN(startDate.getTime()) ? new Date(now) : startDate
+  return {
+    ...record,
+    ...fields,
+    startedAt: Number.isNaN(parsedStart.getTime()) ? record.startedAt : input.startedAt,
+    endedAt: input.endedAt ?? null,
+    recordDate: toLocalDateString(safeStart),
+    tzOffsetMinutes: tzOffsetMinutes(safeStart),
+    note: input.note?.trim() ? input.note.trim() : null,
+    tags: input.tags && input.tags.length > 0 ? [...new Set(input.tags)] : null,
+    updatedAt: now.toISOString(),
+  }
+}
+
 export const useFeedingStore = defineStore('feeding', {
   state: () => ({
     records: [] as FeedingRecord[],
     currentBabyId: null as string | null,
     currentDate: '',
     loading: false,
+    loadingMore: false,
     pendingCount: 0,
+    pendingIds: [] as string[],
+    page: 1,
+    pageSize: 20,
+    total: 0,
+    hasNext: false,
+    loadSeq: 0,
     lastError: null as string | null,
   }),
 
@@ -65,18 +123,49 @@ export const useFeedingStore = defineStore('feeding', {
 
     async refreshPendingCount(): Promise<void> {
       try {
-        this.pendingCount = await countOutbox('FEEDING_RECORD')
+        const items = await listOutbox()
+        const feedingItems = items.filter((item) => item.entityType === 'FEEDING_RECORD')
+        this.pendingCount = feedingItems.length
+        this.pendingIds = feedingItems.map((item) => item.entityId)
       } catch {
-        this.pendingCount = 0
+        this.pendingCount = await countOutbox('FEEDING_RECORD').catch(() => 0)
+        this.pendingIds = []
       }
     },
 
     /** 缓存优先：先渲染 IndexedDB，再拉服务端；失败保留缓存 */
     async loadDay(babyId: string, recordDate: string): Promise<void> {
+      await this.loadDayPage(babyId, recordDate, 1, 100, false)
+    },
+
+    /**
+     * 记录页分页加载（契约 page 1 起、size 默认 20、最大 100）。
+     * 缓存先展示；服务端失败时保留缓存并给出错误提示。
+     */
+    async loadDayPage(
+      babyId: string,
+      recordDate: string,
+      page = 1,
+      size = 20,
+      append = false,
+    ): Promise<void> {
       if (!babyId) return
+      const safePage = Math.max(1, page)
+      const safeSize = Math.min(100, Math.max(1, size))
+      const seq = this.loadSeq + 1
+      this.loadSeq = seq
       this.currentBabyId = babyId
       this.currentDate = recordDate
-      this.loading = true
+      this.page = safePage
+      this.pageSize = safeSize
+      if (append) {
+        this.loadingMore = true
+      } else {
+        this.loading = true
+        this.records = []
+        this.hasNext = false
+        this.total = 0
+      }
 
       let cached: FeedingRecord[] = []
       try {
@@ -84,29 +173,64 @@ export const useFeedingStore = defineStore('feeding', {
       } catch {
         cached = []
       }
-      this.mergeRecords(cached)
+      if (seq !== this.loadSeq) return
+
+      if (!append) {
+        this.mergeRecords(cached)
+      }
 
       try {
-        const page = await listFeedingRecords({ babyId, date: recordDate, page: 1, size: 100 })
-        const serverItems = page.items.filter((record) => !record.deletedAt)
-        // 本地尚未同步成功的记录不能因服务端返回而丢失
-        const pendingLocal = cached.filter(
-          (record) => record.revision === 0 && !serverItems.some((server) => server.id === record.id),
+        const result = await listFeedingRecords({
+          babyId,
+          date: recordDate,
+          page: safePage,
+          size: safeSize,
+        })
+        if (seq !== this.loadSeq) return
+        const serverItems = result.items.filter((record) => !record.deletedAt)
+        const knownIds = new Set(
+          [...(append ? this.records : []), ...serverItems].map((record) => record.id),
         )
-        this.mergeRecords([...serverItems, ...pendingLocal])
+        const pendingLocal = cached.filter(
+          (record) => record.revision === 0 && !knownIds.has(record.id),
+        )
+        this.mergeRecords(
+          append ? [...this.records, ...serverItems, ...pendingLocal] : [...serverItems, ...pendingLocal],
+        )
+        this.page = result.page
+        this.pageSize = result.size
+        this.total = result.total
+        this.hasNext = result.hasNext
         try {
-          await putFeedingRecordsCache(this.records)
+          await putFeedingRecordsCache([...serverItems, ...pendingLocal])
         } catch {
           // 缓存写入失败不影响当前展示
         }
         this.lastError = null
       } catch (error) {
-        this.mergeRecords(cached)
+        if (seq !== this.loadSeq) return
+        this.mergeRecords([...this.records, ...cached])
+        this.hasNext = false
+        this.total = this.records.filter((record) => !record.deletedAt).length
         this.lastError = errorMessage(error, '记录加载失败，当前显示本地缓存')
       } finally {
-        this.loading = false
-        await this.refreshPendingCount()
+        if (seq === this.loadSeq) {
+          this.loading = false
+          this.loadingMore = false
+          await this.refreshPendingCount()
+        }
       }
+    },
+
+    async loadMore(): Promise<void> {
+      if (!this.hasNext || this.loadingMore || !this.currentBabyId) return
+      await this.loadDayPage(
+        this.currentBabyId,
+        this.currentDate,
+        this.page + 1,
+        this.pageSize,
+        true,
+      )
     },
 
     /**
@@ -140,6 +264,132 @@ export const useFeedingStore = defineStore('feeding', {
       }
       await this.refreshPendingCount()
       return record
+    },
+
+    /**
+     * 编辑记录：本地立即生效并折叠进 outbox；在线时同步服务端。
+     * 409 冲突按契约使用服务端 data.current 覆盖本地。
+     */
+    async updateRecord(
+      record: FeedingRecord,
+      input: FeedingRecordInput,
+    ): Promise<FeedingMutationOutcome> {
+      const validationError = validateFeedingInput(input)
+      if (validationError) throw new Error(validationError)
+
+      const updated = buildUpdatedRecord(record, input)
+      try {
+        await putFeedingRecordCache(updated)
+      } catch {
+        // 缓存失败不影响 Pinia 展示
+      }
+      try {
+        await enqueueOutbox({
+          entityType: 'FEEDING_RECORD',
+          entityId: updated.id,
+          op: 'UPSERT',
+          baseRevision: record.revision,
+          data: toFeedingSyncData(updated),
+        })
+      } catch {
+        // 队列失败时至少保留本地修改
+      }
+      this.mergeRecords([...this.records, updated])
+      await this.refreshPendingCount()
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return { status: 'pending', record: updated, message: '离线，修改待同步' }
+      }
+
+      if (record.revision === 0) {
+        const ok = await this.syncRecord(updated)
+        const merged = this.records.find((item) => item.id === updated.id) ?? updated
+        if (ok) return { status: 'synced', record: merged }
+        const status = this.pendingIds.includes(updated.id) ? 'pending' : 'failed'
+        return {
+          status,
+          record: merged,
+          message: status === 'pending' ? '网络不可用，修改待同步' : this.lastError ?? '保存失败',
+        }
+      }
+
+      try {
+        const server = await patchFeedingRecordRequest(record.id, {
+          baseRevision: record.revision,
+          ...toFeedingSyncData(updated),
+        })
+        await this.applyServerRecord(server)
+        this.lastError = null
+        return { status: 'synced', record: server }
+      } catch (error) {
+        const current = conflictCurrent(error)
+        if (current) {
+          await this.applyServerRecord(current)
+          return {
+            status: 'conflict',
+            record: current,
+            message: '该记录已在其他端更新',
+          }
+        }
+        if (isRetryableApiError(error)) {
+          this.lastError = errorMessage(error, '网络不可用，修改待同步')
+          return { status: 'pending', record: updated, message: this.lastError }
+        }
+        await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
+        await this.refreshPendingCount()
+        this.lastError = errorMessage(error, '保存失败')
+        return { status: 'failed', record: updated, message: this.lastError }
+      }
+    },
+
+    /** 删除记录：本地立即隐藏；已同步记录带 baseRevision 通知服务端 */
+    async deleteRecord(record: FeedingRecord): Promise<FeedingMutationOutcome> {
+      try {
+        await deleteFeedingRecordCache(record.id)
+      } catch {
+        // 缓存删除失败时仍从 Pinia 移除
+      }
+      this.records = this.records.filter((item) => item.id !== record.id)
+      try {
+        await enqueueOutbox({
+          entityType: 'FEEDING_RECORD',
+          entityId: record.id,
+          op: 'DELETE',
+          baseRevision: record.revision,
+        })
+      } catch {
+        // 队列失败时本地仍视为已删除
+      }
+      await this.refreshPendingCount()
+
+      if (record.revision === 0) {
+        return { status: 'synced' }
+      }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return { status: 'pending', message: '离线，删除待同步' }
+      }
+
+      try {
+        await deleteFeedingRecordRequest(record.id, record.revision)
+        await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
+        await this.refreshPendingCount()
+        this.lastError = null
+        return { status: 'synced' }
+      } catch (error) {
+        const current = conflictCurrent(error)
+        if (current) {
+          await this.applyServerRecord(current)
+          return { status: 'conflict', record: current, message: '该记录已在其他端更新' }
+        }
+        if (isRetryableApiError(error)) {
+          this.lastError = errorMessage(error, '网络不可用，删除待同步')
+          return { status: 'pending', message: this.lastError }
+        }
+        await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
+        await this.refreshPendingCount()
+        this.lastError = errorMessage(error, '删除失败')
+        return { status: 'failed', message: this.lastError }
+      }
     },
 
     async applyServerRecord(record: FeedingRecord): Promise<void> {

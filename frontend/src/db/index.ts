@@ -135,9 +135,28 @@ export async function getFeedingRecordsByBabyDate(
   return db.getAllFromIndex('feedingRecords', 'byBabyDate', [babyId, recordDate])
 }
 
+/** 统计离线计算用：闭区间取本地缓存喂养记录 */
+export async function getFeedingRecordsByBabyRange(
+  babyId: string,
+  from: string,
+  to: string,
+): Promise<FeedingRecord[]> {
+  const db = await getDb()
+  return db.getAllFromIndex(
+    'feedingRecords',
+    'byBabyDate',
+    IDBKeyRange.bound([babyId, from], [babyId, to]),
+  )
+}
+
 export async function getFeedingRecordCache(id: string): Promise<FeedingRecord | undefined> {
   const db = await getDb()
   return db.get('feedingRecords', id)
+}
+
+export async function deleteFeedingRecordCache(id: string): Promise<void> {
+  const db = await getDb()
+  await db.delete('feedingRecords', id)
 }
 
 export async function deleteFeedingRecordsByBaby(babyId: string): Promise<void> {
@@ -157,6 +176,16 @@ export async function putGrowthRecordCache(record: GrowthRecord): Promise<void> 
   await db.put('growthRecords', toPlain(record))
 }
 
+export async function getGrowthRecordCache(id: string): Promise<GrowthRecord | undefined> {
+  const db = await getDb()
+  return db.get('growthRecords', id)
+}
+
+export async function deleteGrowthRecordCache(id: string): Promise<void> {
+  const db = await getDb()
+  await db.delete('growthRecords', id)
+}
+
 export async function deleteGrowthRecordsByBaby(babyId: string): Promise<void> {
   const db = await getDb()
   const tx = db.transaction('growthRecords', 'readwrite')
@@ -171,7 +200,20 @@ export async function deleteGrowthRecordsByBaby(babyId: string): Promise<void> {
 
 export async function getGrowthRecordsByBaby(babyId: string): Promise<GrowthRecord[]> {
   const db = await getDb()
-  return db.getAllFromIndex('growthRecords', 'byBabyDate', IDBKeyRange.bound([babyId, ''], [babyId, '￿']))
+  return db.getAllFromIndex('growthRecords', 'byBaby', babyId)
+}
+
+export async function getGrowthRecordsByBabyRange(
+  babyId: string,
+  from: string,
+  to: string,
+): Promise<GrowthRecord[]> {
+  const db = await getDb()
+  return db.getAllFromIndex(
+    'growthRecords',
+    'byBabyDate',
+    IDBKeyRange.bound([babyId, from], [babyId, to]),
+  )
 }
 
 export async function setMeta(key: string, value: unknown): Promise<void> {

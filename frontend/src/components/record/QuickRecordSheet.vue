@@ -170,6 +170,7 @@ function handleFinish(payload: { durationSec: number; endedAt: string }): void {
     round
     closeable
     :style="{ maxHeight: '92vh' }"
+    data-testid="quick-record-sheet"
     @update:show="emit('update:show', $event)"
   >
     <div v-if="show" class="quick-record">
@@ -205,6 +206,7 @@ function handleFinish(payload: { durationSec: number; endedAt: string }): void {
       <div class="quick-record__extra">
         <van-field
           v-model="note"
+          data-testid="quick-record-note"
           label="备注"
           type="textarea"
           rows="2"
@@ -219,7 +221,14 @@ function handleFinish(payload: { durationSec: number; endedAt: string }): void {
       <p v-if="errorText" class="quick-record__error">{{ errorText }}</p>
 
       <div v-if="!isTimed" class="quick-record__submit">
-        <van-button type="primary" block round :loading="saving" @click="handleSave()">
+        <van-button
+          type="primary"
+          block
+          round
+          :loading="saving"
+          data-testid="quick-record-save"
+          @click="handleSave()"
+        >
           保存记录
         </van-button>
       </div>
