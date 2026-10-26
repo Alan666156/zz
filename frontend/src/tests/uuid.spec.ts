@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isUuidV4, uuidV4 } from '@/utils/uuid'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('uuidV4', () => {
   it('生成合法 UUID v4', () => {
@@ -13,6 +17,11 @@ describe('uuidV4', () => {
   it('批量生成不重复', () => {
     const set = new Set(Array.from({ length: 300 }, () => uuidV4()))
     expect(set.size).toBe(300)
+  })
+
+  it('安全随机数不可用时抛错，不降级 Math.random（FE-09）', () => {
+    vi.stubGlobal('crypto', {})
+    expect(() => uuidV4()).toThrow('当前浏览器不支持安全随机数')
   })
 
   it('拒绝非 v4 字符串', () => {

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ApiError, isRetryableApiError } from '@/api/client'
 import { pushSyncBatch, type SyncChange, type SyncPushResult } from '@/api/sync'
 import { SYNC_CONFLICT_COPY } from '@/constants/copy'
+import { SYNC_BATCH_PLAN_META_KEY } from '@/constants/sync'
 import {
   deleteMeta,
   getFeedingRecordCache,
@@ -53,9 +54,8 @@ const RETRY_DELAYS_MS = [1000, 2000, 5000, 15000, 60000, 300000]
 /**
  * 批次幂等（契约 §4.10 / §5.4）：每次新尝试生成新 batchId，
  * 同一批的网络重试必须复用原 batchId 才能命中服务端 24h 缓存。
+ * SYNC_BATCH_PLAN_META_KEY 见 constants/sync.ts（删除宝宝时也要清理）。
  */
-const SYNC_BATCH_PLAN_META_KEY = 'sync.batchPlan'
-
 interface SyncBatchPlan {
   batchId: string
   /** 随批次固化：服务端对含 clientTime 的完整请求体做哈希，重试必须逐字节一致 */

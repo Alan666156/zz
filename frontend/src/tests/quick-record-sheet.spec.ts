@@ -3,6 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import QuickRecordSheet from '@/components/record/QuickRecordSheet.vue'
+import { useUiStore } from '@/stores/ui'
 import type { FeedingRecordInput } from '@/types/models'
 import { buildLocalFeedingRecord } from '@/utils/feeding'
 
@@ -88,6 +89,21 @@ describe('QuickRecordSheet', () => {
       durationSec: null,
     })
     expect(babyId).toBe('baby-1')
+    wrapper.unmount()
+  })
+
+  it('保存失败时不提示「已记录」并展示错误（FE-08）', async () => {
+    mocks.save.mockRejectedValue(new Error('保存失败，请检查浏览器存储空间后重试'))
+    const ui = useUiStore()
+    const toastSpy = vi.spyOn(ui, 'toast')
+    const wrapper = mountSheet()
+    await clickTab(wrapper, '配方奶')
+    await wrapper.find('input[placeholder="例如 120"]').setValue('120')
+    await clickButton(wrapper, '保存记录')
+
+    expect(toastSpy).not.toHaveBeenCalled()
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    expect(wrapper.text()).toContain('保存失败')
     wrapper.unmount()
   })
 

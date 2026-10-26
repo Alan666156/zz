@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
-import { getBabiesCache, putBabyCache } from '@/db'
+import { SYNC_BATCH_PLAN_META_KEY } from '@/constants/sync'
+import { getBabiesCache, getMeta, putBabyCache, setMeta } from '@/db'
 import { enqueueOutbox, getOutboxItem, listOutbox, outboxKey } from '@/db/outbox'
 import { useBabyStore } from '@/stores/baby'
 import type { Baby } from '@/types/models'
@@ -218,5 +219,48 @@ describe('baby store', () => {
 
     expect(store.babies).toHaveLength(0)
     expect(await getBabiesCache()).toHaveLength(0)
+  })
+
+  it('删除宝宝清理其记录级 outbox 和批次计划（FE-07）', async () => {
+    const babyA = makeBaby({ id: 'a', name: 'A', isDefault: false, revision: 1 })
+    const babyB = makeBaby({ id: 'b', name: 'B', isDefault: true, revision: 1 })
+    apiMocks.deleteBabyRequest.mockResolvedValue(undefined)
+    const store = useBabyStore()
+    store.babies = [babyB, babyA]
+
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: 'feed-a',
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { babyId: 'a' },
+      babyId: 'a',
+    })
+    await enqueueOutbox({
+      entityType: 'GROWTH_RECORD',
+      entityId: 'growth-a',
+      op: 'DELETE',
+      baseRevision: 1,
+      babyId: 'a',
+    })
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: 'feed-b',
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { babyId: 'b' },
+      babyId: 'b',
+    })
+    await setMeta(SYNC_BATCH_PLAN_META_KEY, {
+      batchId: 'batch-a',
+      clientTime: '2026-10-26T10:00:00+08:00',
+      keys: [outboxKey('FEEDING_RECORD', 'feed-a')],
+      fingerprint: 'stale',
+    })
+
+    await store.removeBaby('a')
+
+    expect((await listOutbox()).map((item) => item.entityId)).toEqual(['feed-b'])
+    expect(await getMeta(SYNC_BATCH_PLAN_META_KEY)).toBeUndefined()
   })
 })

@@ -1,4 +1,5 @@
-import { getDb } from './index'
+import { deleteMeta, getDb, getMeta } from './index'
+import { SYNC_BATCH_PLAN_META_KEY } from '@/constants/sync'
 import type { OutboxItem, SyncEntityType, SyncOp } from '@/types/models'
 
 export function outboxKey(entityType: SyncEntityType, entityId: string): string {
@@ -16,6 +17,8 @@ interface EnqueueInput {
   op: SyncOp
   baseRevision: number
   data?: Record<string, unknown>
+  /** 记录所属宝宝（仅本地），删除宝宝时用于清理 outbox */
+  babyId?: string
   now?: Date
 }
 
@@ -46,6 +49,7 @@ export async function enqueueOutbox(input: EnqueueInput): Promise<EnqueueResult>
         entityId: input.entityId,
         op: 'DELETE',
         baseRevision: existing ? existing.baseRevision : input.baseRevision,
+        babyId: existing?.babyId ?? input.babyId,
         createdAt: existing?.createdAt ?? nowIso,
         nextRetryAt: nowIso,
         attemptCount: 0,
@@ -60,6 +64,7 @@ export async function enqueueOutbox(input: EnqueueInput): Promise<EnqueueResult>
       ...existing,
       op: 'UPSERT',
       data: input.data,
+      babyId: input.babyId ?? existing.babyId,
       nextRetryAt: nowIso,
       attemptCount: 0,
       failed: false,
@@ -79,6 +84,7 @@ export async function enqueueOutbox(input: EnqueueInput): Promise<EnqueueResult>
       op: 'UPSERT',
       baseRevision: input.baseRevision,
       data: input.data,
+      babyId: input.babyId,
       createdAt: nowIso,
       nextRetryAt: nowIso,
       attemptCount: 0,
@@ -95,6 +101,32 @@ export async function getOutboxItem(key: string): Promise<OutboxItem | undefined
 export async function removeOutbox(key: string): Promise<void> {
   const db = await getDb()
   await db.delete('outbox', key)
+}
+
+/**
+ * 删除宝宝后清理其记录级 outbox 项（FEEDING_RECORD / GROWTH_RECORD）。
+ * 否则恢复网络后服务端会把它们判 REJECTED，而本地缓存已删，用户无法处理。
+ * 若已有批次计划引用了被删条目，一并清除计划，下一轮重新生成批次（FE-07）。
+ */
+export async function removeOutboxByBaby(babyId: string): Promise<string[]> {
+  const db = await getDb()
+  const items = await db.getAll('outbox')
+  const keys = items
+    .filter(
+      (item) =>
+        item.entityType !== 'BABY' &&
+        (item.babyId === babyId || item.data?.babyId === babyId),
+    )
+    .map((item) => item.key)
+  for (const key of keys) await db.delete('outbox', key)
+
+  if (keys.length > 0) {
+    const plan = await getMeta<{ keys?: string[] }>(SYNC_BATCH_PLAN_META_KEY)
+    if (plan?.keys?.some((key) => keys.includes(key))) {
+      await deleteMeta(SYNC_BATCH_PLAN_META_KEY)
+    }
+  }
+  return keys
 }
 
 const ENTITY_PRIORITY: Record<SyncEntityType, number> = {

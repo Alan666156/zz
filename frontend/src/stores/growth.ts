@@ -118,6 +118,8 @@ export const useGrowthStore = defineStore('growth', {
     pendingIds: [] as string[],
     loadSeq: 0,
     lastError: null as string | null,
+    /** 本机缓存写入失败：记录仅保留在 Pinia，刷新后可能丢失（FE-08） */
+    cacheDegraded: false,
   }),
 
   getters: {
@@ -146,6 +148,26 @@ export const useGrowthStore = defineStore('growth', {
       } catch {
         this.pendingCount = 0
         this.pendingIds = []
+      }
+    },
+
+    /** 缓存写失败可降级为仅内存，但必须显式标记，不能静默吞掉（FE-08） */
+    async persistRecordCache(record: GrowthRecord): Promise<void> {
+      try {
+        await putGrowthRecordCache(record)
+        this.cacheDegraded = false
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机缓存不可用，记录仅在当前页面保留'
+      }
+    },
+
+    async dropRecordCache(id: string): Promise<void> {
+      try {
+        await deleteGrowthRecordCache(id)
+        this.cacheDegraded = false
+      } catch {
+        this.cacheDegraded = true
       }
     },
 
@@ -230,11 +252,7 @@ export const useGrowthStore = defineStore('growth', {
       if (validationError) throw new Error(validationError)
 
       const record = buildLocalGrowthRecord(input, babyId)
-      try {
-        await putGrowthRecordCache(record)
-      } catch {
-        // IndexedDB 不可用时至少保证 Pinia 可用
-      }
+      await this.persistRecordCache(record)
       try {
         await enqueueOutbox({
           entityType: 'GROWTH_RECORD',
@@ -242,9 +260,13 @@ export const useGrowthStore = defineStore('growth', {
           op: 'UPSERT',
           baseRevision: 0,
           data: toGrowthSyncData(record),
+          babyId: record.babyId,
         })
       } catch {
-        // 队列失败时仍展示本地记录
+        // 队列写不进去 = 无法保证刷新后仍在，必须回滚并让调用方提示保存失败（FE-08）
+        await deleteGrowthRecordCache(record.id).catch(() => undefined)
+        this.cacheDegraded = true
+        throw new Error('保存失败，请检查浏览器存储空间后重试')
       }
       if (record.babyId === this.currentBabyId) {
         this.mergeRecords([record, ...this.records])
@@ -271,11 +293,7 @@ export const useGrowthStore = defineStore('growth', {
       if (validationError) throw new Error(validationError)
 
       const updated = buildUpdatedGrowthRecord(record, input)
-      try {
-        await putGrowthRecordCache(updated)
-      } catch {
-        // 缓存失败不影响 Pinia 展示
-      }
+      await this.persistRecordCache(updated)
       try {
         await enqueueOutbox({
           entityType: 'GROWTH_RECORD',
@@ -283,9 +301,14 @@ export const useGrowthStore = defineStore('growth', {
           op: 'UPSERT',
           baseRevision: record.revision,
           data: toGrowthSyncData(updated),
+          babyId: updated.babyId,
         })
       } catch {
-        // 队列失败时至少保留本地修改
+        // 回滚缓存与 Pinia，不能让用户以为修改已保存（FE-08）
+        await putGrowthRecordCache(record).catch(() => {
+          this.cacheDegraded = true
+        })
+        throw new Error('保存失败，请检查浏览器存储空间后重试')
       }
       this.mergeRecords([...this.records, updated])
       await this.refreshPendingCount()
@@ -333,11 +356,7 @@ export const useGrowthStore = defineStore('growth', {
 
     /** 删除：本地立即隐藏；已同步记录带 baseRevision 通知服务端 */
     async deleteRecord(record: GrowthRecord): Promise<GrowthMutationOutcome> {
-      try {
-        await deleteGrowthRecordCache(record.id)
-      } catch {
-        // 缓存删除失败时仍从 Pinia 移除
-      }
+      await this.dropRecordCache(record.id)
       this.records = this.records.filter((item) => item.id !== record.id)
       try {
         await enqueueOutbox({
@@ -345,9 +364,16 @@ export const useGrowthStore = defineStore('growth', {
           entityId: record.id,
           op: 'DELETE',
           baseRevision: record.revision,
+          babyId: record.babyId,
         })
       } catch {
-        // 队列失败时本地仍视为已删除
+        // 回滚缓存与 Pinia，删除没有进入队列就不能假装成功（FE-08）
+        await putGrowthRecordCache(record).catch(() => {
+          this.cacheDegraded = true
+        })
+        this.mergeRecords([...this.records, record])
+        await this.refreshPendingCount()
+        throw new Error('删除失败，请检查浏览器存储空间后重试')
       }
       await this.refreshPendingCount()
 
