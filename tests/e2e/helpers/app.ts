@@ -8,7 +8,6 @@ import {
 } from '@playwright/test';
 
 import { API_BASE_URL, API_PREFIX, addDays } from '../../api/helpers/env';
-import { KNOWN_NETWORK_ERRORS } from './page';
 import { uuid } from '../../api/helpers/fixtures';
 import { flushRedisDb } from '../../api/helpers/redis';
 
@@ -598,27 +597,4 @@ export async function readDownloadBytes(download: Download): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/* ------------------------------------------------------------------ */
-/* 错误收集                                                            */
-/* ------------------------------------------------------------------ */
-
-export function expectNoUnexpectedErrors(
-  errors: readonly string[],
-  allowed: readonly RegExp[] = [],
-): void {
-  const unexpected = errors.filter(
-    (message) => !allowed.some((pattern) => pattern.test(message)),
-  );
-  expect(unexpected, `页面出现未预期的错误：\n${unexpected.join('\n')}`).toEqual([]);
-}
-
-/**
- * 离线/请求失败时浏览器会打网络日志，这些不是页面未捕获异常。
- * 仅豁免 net:: 层失败与已登记的已知噪音，不笼统放过所有 4xx/5xx。
- */
-export const OFFLINE_NETWORK_LOGS: readonly RegExp[] = [
-  ...KNOWN_NETWORK_ERRORS,
-  /ERR_INTERNET_DISCONNECTED/,
-  /ERR_NETWORK/,
-  /net::ERR_/,
-];
+/* 错误收集统一使用 `helpers/page.ts` 的 `expectNoPageErrors`（Q-23）。 */

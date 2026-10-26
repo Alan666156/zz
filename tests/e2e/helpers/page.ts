@@ -46,23 +46,29 @@ export async function apiContextForDevice(deviceId: string): Promise<APIRequestC
   });
 }
 
-/**
- * 已知的网络噪音（不是应用异常）：
- * - 首次 GET /babies 在设备注册前返回 409 DEVICE_NOT_REGISTERED（契约 §5.4 的正常流程）。
- * 逐条说明，避免笼统豁免所有 console.error。
- * favicon 404 已由 FE-02 修复，不再豁免；若复现即视为回归。
- */
-export const KNOWN_NETWORK_ERRORS: readonly RegExp[] = [
-  /Failed to load resource: the server responded with a status of 409 \(Conflict\).*\/api\/v1\/babies/,
-];
+/** 浏览器自动产生的资源加载失败日志前缀（Q-23 统一豁免）。 */
+export const RESOURCE_LOAD_ERROR_PREFIX = 'Failed to load resource:';
 
-/** 收集控制台 error 与未捕获异常；资源加载失败带上来源 URL 以便精确豁免。 */
+const CONSOLE_ERROR_PREFIX = 'console.error: ';
+
+/** 控制台错误条目是否属于浏览器资源加载失败（与 app 代码无关）。 */
+export function isBrowserResourceError(error: string): boolean {
+  const text = error.startsWith(CONSOLE_ERROR_PREFIX)
+    ? error.slice(CONSOLE_ERROR_PREFIX.length)
+    : error;
+  return text.startsWith(RESOURCE_LOAD_ERROR_PREFIX);
+}
+
+/**
+ * 收集控制台 error 与未捕获异常；资源加载失败带上来源 URL 便于排查。
+ * 豁免只按 Q-23 的前缀判断，不按状态码或 URL 逐条白名单。
+ */
 export function collectPageErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') {
       const url = message.location()?.url;
-      errors.push(`console.error: ${message.text()}${url ? ` (${url})` : ''}`);
+      errors.push(`${CONSOLE_ERROR_PREFIX}${message.text()}${url ? ` (${url})` : ''}`);
     }
   });
   page.on('pageerror', (error) => {
@@ -71,10 +77,11 @@ export function collectPageErrors(page: Page): string[] {
   return errors;
 }
 
-export function expectNoPageErrors(
-  errors: readonly string[],
-  allowed: readonly RegExp[] = KNOWN_NETWORK_ERRORS,
-): void {
-  const unexpected = errors.filter((message) => !allowed.some((pattern) => pattern.test(message)));
+/**
+ * Q-23：只豁免浏览器自动资源加载失败日志；pageerror 与其余 console.error 一律失败。
+ * 预期 HTTP 状态必须由响应断言单独覆盖，不能用本函数代替接口断言。
+ */
+export function expectNoPageErrors(errors: readonly string[]): void {
+  const unexpected = errors.filter((message) => !isBrowserResourceError(message));
   expect(unexpected, `页面出现未预期的错误：\n${unexpected.join('\n')}`).toEqual([]);
 }

@@ -1,10 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 import {
-  OFFLINE_NETWORK_LOGS,
   SYNC_LOCK_KEY,
   browserToday,
-  expectNoUnexpectedErrors,
   editAmountInput,
   expectToast,
   fillMilkAmount,
@@ -22,7 +20,7 @@ import {
   waitForFeedingCount,
   waitForToastToHide,
 } from './helpers/app';
-import { collectPageErrors } from './helpers/page';
+import { collectPageErrors, expectNoPageErrors } from './helpers/page';
 
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §5.4、§4.10
@@ -81,7 +79,7 @@ test.describe('E2E 离线（UI-15..16）', () => {
     await expect(page.getByTestId('feeding-record-item')).toContainText('100 毫升');
     expect(await readLocalStorage(page, SYNC_LOCK_KEY)).toBeNull();
 
-    expectNoUnexpectedErrors(errors, OFFLINE_NETWORK_LOGS);
+    expectNoPageErrors(errors);
   });
 
   test('UI-16 离线编辑折叠为一条', async ({ page, context, request }) => {
@@ -140,6 +138,6 @@ test.describe('E2E 离线（UI-15..16）', () => {
     await expect(item).toHaveCount(1);
     await expect(item).toContainText('120 毫升');
 
-    expectNoUnexpectedErrors(errors, OFFLINE_NETWORK_LOGS);
+    expectNoPageErrors(errors);
   });
 });

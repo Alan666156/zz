@@ -9,7 +9,6 @@ import {
   stripBom,
 } from './helpers/csv';
 import { execSql, queryOne } from './helpers/db';
-import { flushRedisDb } from './helpers/redis';
 import { deviceHashHex } from './helpers/device-hash';
 import {
   decodeExportTokenPayload,
@@ -85,8 +84,10 @@ test.describe('CSV 导出（EXP）', () => {
 
     const download = await downloadCsv(request, ticket.data.downloadUrl);
     expect(download.status).toBe(200);
-    // Tomcat 会去掉 `;` 后的可选空白（RFC 9110 OWS），语义仍为 text/csv + UTF-8。
-    expect(download.headers['content-type']).toMatch(/^text\/csv;\s*charset=UTF-8$/i);
+    // Q-21：按 MIME 语义判定，允许参数名/值大小写差异与分号前后可选空白。
+    expect(download.headers['content-type']).toMatch(
+      /^text\/csv\s*;\s*charset\s*=\s*utf-8$/i,
+    );
     expect(download.headers['content-disposition']).toBe(
       'attachment; filename="feeding-records-2026-10-20-2026-10-20.csv"',
     );
@@ -272,10 +273,11 @@ test.describe('CSV 导出（EXP）', () => {
     expect(JSON.parse(afterDelete.text).code).toBe('NOT_FOUND');
   });
 
-  test('EXP-09 导出参数校验与设备归属', async ({ request }) => {
+  test('EXP-09 导出参数校验、失败不计数与设备归属', async ({ request }) => {
     const { client, baby } = await setupBaby(request);
     const otherDevice = await setupBaby(request);
 
+    // Q-20：失败请求预占后回滚，不消耗导出口径；5 次非法请求后 remaining 仍为 5。
     for (const payload of [
       { from: '2026-10-20', to: '2026-10-20' },
       { babyId: baby.id },
@@ -283,34 +285,56 @@ test.describe('CSV 导出（EXP）', () => {
       { babyId: baby.id, from: '2026/10/20', to: '2026-10-20' },
       { babyId: baby.id, from: '2025-10-19', to: '2026-10-20' },
     ]) {
-      await expectError(
-        await client.post('/exports/feeding-records', payload),
-        400,
-        'VALIDATION_ERROR',
-      );
+      const response = await client.post('/exports/feeding-records', payload);
+      await expectError(response, 400, 'VALIDATION_ERROR');
+      expect(response.headers()['x-ratelimit-limit']).toBe('5');
+      expect(response.headers()['x-ratelimit-remaining']).toBe('5');
     }
 
-    // 导出限流为 5 次/小时/设备，且契约 §2.4 不区分成败、POST 即计数：
-    // 上面 5 次参数校验已用满额度。本用例校验的是参数与归属，不是限流，
-    // 因此清空 DB14 的计数后再验证 366 天成功路径（限流专项见 RL）。
-    flushRedisDb();
-    await expectOk(
-      await client.post('/exports/feeding-records', {
+    // 5 次成功签发依次消耗配额：4 → 3 → 2 → 1 → 0。
+    const remainingAfterSuccess: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const response = await client.post('/exports/feeding-records', {
         babyId: baby.id,
         from: '2025-10-20',
         to: '2026-10-20',
-      }),
-    );
+      });
+      const body = await expectOk<ExportTicket>(response);
+      expect(body.data.rowCount).toBe(0);
+      expect(response.headers()['x-ratelimit-limit']).toBe('5');
+      remainingAfterSuccess.push(response.headers()['x-ratelimit-remaining']);
+    }
+    expect(remainingAfterSuccess).toEqual(['4', '3', '2', '1', '0']);
 
-    await expectError(
-      await client.post('/exports/feeding-records', {
-        babyId: baby.id,
-        from: '2026-10-20',
-        to: '2026-10-20',
-      }, { headers: { 'X-Device-Id': otherDevice.deviceId } }),
-      404,
-      'NOT_FOUND',
-    );
+    // 第 6 次成功请求：429 + remaining=0 + Retry-After。
+    const blocked = await client.post('/exports/feeding-records', {
+      babyId: baby.id,
+      from: '2026-10-20',
+      to: '2026-10-20',
+    });
+    expect(blocked.status()).toBe(429);
+    expect(blocked.headers()['x-ratelimit-limit']).toBe('5');
+    expect(blocked.headers()['x-ratelimit-remaining']).toBe('0');
+    expect(Number(blocked.headers()['retry-after'])).toBeGreaterThanOrEqual(1);
+    await expectError(blocked, 429, 'RATE_LIMITED');
+
+    // 配额耗尽后即使请求体非法也返回 429（限流先于业务校验）。
+    const invalidWhenExhausted = await client.post('/exports/feeding-records', {
+      babyId: baby.id,
+    });
+    expect(invalidWhenExhausted.status()).toBe(429);
+    expect(invalidWhenExhausted.headers()['x-ratelimit-remaining']).toBe('0');
+    await expectError(invalidWhenExhausted, 429, 'RATE_LIMITED');
+
+    // 设备归属：另一设备使用自己的配额访问 D1 的宝宝 → 404，且失败不消耗配额。
+    const notFound = await otherDevice.client.post('/exports/feeding-records', {
+      babyId: baby.id,
+      from: '2026-10-20',
+      to: '2026-10-20',
+    });
+    await expectError(notFound, 404, 'NOT_FOUND');
+    expect(notFound.headers()['x-ratelimit-limit']).toBe('5');
+    expect(notFound.headers()['x-ratelimit-remaining']).toBe('5');
   });
 
   test('EXP-10 token 篡改与过期', async ({ request }) => {

@@ -106,8 +106,8 @@ async function push(client: ApiClient, body: ReturnType<typeof batch>) {
 }
 
 /**
- * 契约：docs/architecture/v1.0-baby-feeding.md §4.10、addendum Q-05..Q-08/Q-17
- * 用例：docs/tests/v1.0.md §13（SYNC-01..SYNC-17）
+ * 契约：docs/architecture/v1.0-baby-feeding.md §4.10、addendum Q-05..Q-08/Q-17/Q-22
+ * 用例：docs/tests/v1.0.md §13（SYNC-01..SYNC-20）
  * 状态：TE-02 可执行断言。
  */
 test.describe('离线批量同步（SYNC）', () => {
@@ -610,5 +610,67 @@ test.describe('离线批量同步（SYNC）', () => {
     );
     expect(row?.[0]).toBe('1');
     expect(row?.[1]).toBe('2');
+  });
+
+  test('SYNC-18 首次已提交但响应丢失，复用原请求体重试 → replayed', async ({ request }) => {
+    const { client, baby } = await setupBaby(request);
+    const feedingId = uuid();
+    const body = batch([feedingChange(feedingId, baby.id, 0)]);
+
+    // 第一次请求服务端已提交，但客户端未收到响应；
+    // 客户端必须冻结 batchId/clientTime/changes，用原始 body 重试（Q-22）。
+    await expectOk<SyncData>(await push(client, body));
+    const retry = await expectOk<SyncData>(await push(client, body));
+
+    expect(retry.data.batchId).toBe(body.batchId);
+    expect(retry.data.replayed).toBe(true);
+    expect(retry.data.results.map((item) => [item.status, item.revision])).toEqual([
+      ['APPLIED', 1],
+    ]);
+
+    const list = await expectOk<Page<FeedingRecord>>(
+      await client.get(`/feeding-records?babyId=${baby.id}&date=2026-10-20`),
+    );
+    expect(list.data.total).toBe(1);
+  });
+
+  test('SYNC-19 同 batchId 仅 clientTime 变化 → 409', async ({ request }) => {
+    const { client, baby } = await setupBaby(request);
+    const feedingId = uuid();
+    const body = batch([feedingChange(feedingId, baby.id, 0)]);
+
+    await expectOk<SyncData>(await push(client, body));
+
+    const changedClientTime = {
+      ...body,
+      clientTime: at('2026-10-26', '16:05:00'),
+    };
+    await expectError(await push(client, changedClientTime), 409, 'CONFLICT');
+
+    const record = await expectOk<FeedingRecord>(
+      await client.get(`/feeding-records/${feedingId}`),
+    );
+    expect(record.data.amountValue).toBe(120);
+    expect(record.data.revision).toBe(1);
+  });
+
+  test('SYNC-20 新 batchId + 相同 changes → 正常处理且单条幂等', async ({ request }) => {
+    const { client, baby } = await setupBaby(request);
+    const feedingId = uuid();
+    const body = batch([feedingChange(feedingId, baby.id, 0)]);
+
+    await expectOk<SyncData>(await push(client, body));
+
+    const newBatch = { ...body, batchId: uuid() };
+    const retried = await expectOk<SyncData>(await push(client, newBatch));
+    expect(retried.data.batchId).toBe(newBatch.batchId);
+    expect(retried.data.replayed).toBe(false);
+    expect(retried.data.results[0].status).toBe('DUPLICATE');
+    expect(retried.data.results[0].revision).toBe(1);
+
+    const list = await expectOk<Page<FeedingRecord>>(
+      await client.get(`/feeding-records?babyId=${baby.id}&date=2026-10-20`),
+    );
+    expect(list.data.total).toBe(1);
   });
 });
