@@ -242,6 +242,7 @@ export const useGrowthStore = defineStore('growth', {
           op: 'UPSERT',
           baseRevision: 0,
           data: toGrowthSyncData(record),
+          babyId: record.babyId,
         })
       } catch {
         // 队列失败时仍展示本地记录
@@ -283,6 +284,7 @@ export const useGrowthStore = defineStore('growth', {
           op: 'UPSERT',
           baseRevision: record.revision,
           data: toGrowthSyncData(updated),
+          babyId: updated.babyId,
         })
       } catch {
         // 队列失败时至少保留本地修改
@@ -345,6 +347,7 @@ export const useGrowthStore = defineStore('growth', {
           entityId: record.id,
           op: 'DELETE',
           baseRevision: record.revision,
+          babyId: record.babyId,
         })
       } catch {
         // 队列失败时本地仍视为已删除

@@ -14,7 +14,13 @@ import {
   putBabiesCache,
   replaceBabiesCache,
 } from '@/db'
-import { enqueueOutbox, outboxKey, pendingOutboxOps, removeOutbox } from '@/db/outbox'
+import {
+  enqueueOutbox,
+  outboxKey,
+  pendingOutboxOps,
+  removeOutbox,
+  removeOutboxByBaby,
+} from '@/db/outbox'
 import { MAX_BABIES, type Baby, type BabyInput } from '@/types/models'
 import { getStorageItem, removeStorageItem, setStorageItem } from '@/utils/storage'
 import { requestSync } from '@/utils/sync-events'
@@ -357,6 +363,8 @@ export const useBabyStore = defineStore('baby', {
       await deleteBabyCache(id)
       await deleteFeedingRecordsByBaby(id)
       await deleteGrowthRecordsByBaby(id)
+      // 记录缓存已删，对应的 feeding/growth outbox 也必须清掉，否则联网后会被判 REJECTED（FE-07）
+      await removeOutboxByBaby(id)
       await replaceBabiesCache(this.babies)
 
       const key = outboxKey('BABY', id)
@@ -426,6 +434,11 @@ export const useBabyStore = defineStore('baby', {
       }
       try {
         await deleteGrowthRecordsByBaby(id)
+      } catch {
+        // 忽略
+      }
+      try {
+        await removeOutboxByBaby(id)
       } catch {
         // 忽略
       }

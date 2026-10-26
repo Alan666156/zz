@@ -275,6 +275,7 @@ export const useFeedingStore = defineStore('feeding', {
           op: 'UPSERT',
           baseRevision: 0,
           data: toFeedingSyncData(record),
+          babyId: record.babyId,
         })
       } catch {
         // 离线队列写入失败时仍展示记录，lastError 会在同步阶段提示
@@ -311,6 +312,7 @@ export const useFeedingStore = defineStore('feeding', {
           op: 'UPSERT',
           baseRevision: record.revision,
           data: toFeedingSyncData(updated),
+          babyId: updated.babyId,
         })
       } catch {
         // 队列失败时至少保留本地修改
@@ -385,6 +387,7 @@ export const useFeedingStore = defineStore('feeding', {
           entityId: record.id,
           op: 'DELETE',
           baseRevision: record.revision,
+          babyId: record.babyId,
         })
       } catch {
         // 队列失败时本地仍视为已删除

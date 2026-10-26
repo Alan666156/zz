@@ -145,6 +145,8 @@ export interface OutboxItem {
   op: SyncOp
   baseRevision: number
   data?: Record<string, unknown>
+  /** 记录级条目所属宝宝，仅本地使用；删除宝宝时据此清空 outbox（不发送给服务端） */
+  babyId?: string
   createdAt: string
   nextRetryAt: string
   attemptCount: number

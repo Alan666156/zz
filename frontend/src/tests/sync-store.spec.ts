@@ -559,4 +559,33 @@ describe('sync store', () => {
     expect(growth.records.some((entry) => entry.id === record.id)).toBe(false)
     expect(await listOutbox()).toHaveLength(0)
   })
+
+  it('删除宝宝后其记录不再推送，也不产生失败计数（FE-07）', async () => {
+    const baby: Baby = {
+      id: 'baby-1',
+      name: '小满',
+      gender: 'FEMALE',
+      birthDate: '2026-03-01',
+      isDefault: true,
+      revision: 1,
+      createdAt: '2026-10-26T00:00:00.000Z',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+      deletedAt: null,
+    }
+    const babyStore = useBabyStore()
+    babyStore.babies = [baby]
+    const feeding = useFeedingStore()
+    feeding.currentBabyId = baby.id
+
+    await feeding.createLocal(formulaInput(), baby.id)
+    expect(await listOutbox()).toHaveLength(1)
+
+    await babyStore.removeBaby(baby.id)
+    expect(await listOutbox()).toHaveLength(0)
+
+    const outcome = await useSyncStore().syncNow()
+    expect(syncMocks.pushSyncBatch).not.toHaveBeenCalled()
+    expect(outcome.rejected).toBe(0)
+    expect(useSyncStore().failedCount).toBe(0)
+  })
 })
