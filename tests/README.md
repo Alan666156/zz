@@ -2,10 +2,10 @@
 
 本目录是根级测试工作区，包含 **API 契约测试** 与 **端到端（E2E）测试**。
 
-- 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（Q-24 后 173 条）
+- 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（Q-26 后 179 条）
 - 技术契约：[`../docs/architecture/v1.0-baby-feeding.md`](../docs/architecture/v1.0-baby-feeding.md)
 - 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-24，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
-- 当前状态：**TE-05**。`api/**` 134 条与 `e2e/**` 22 条均已实现为可执行断言。可执行性只表示断言已按契约写好，**不代表全部通过**；已知失败与阻塞见[`../docs/tests/v1.0-te04-defects.md`](../docs/tests/v1.0-te04-defects.md)。
+- 当前状态：**TE-05**。`api/**` 140 条与 `e2e/**` 22 条均已实现为可执行断言；最近全量 151 passed / 0 failed / 11 skipped。可执行性只表示断言已按契约写好；已知失败与门控项见[`../docs/tests/v1.0-te04-defects.md`](../docs/tests/v1.0-te04-defects.md)。
 
 ---
 
@@ -38,11 +38,12 @@ tests/
 │   ├── timezone.spec.ts      # TZ-01..06
 │   ├── stats.spec.ts         # STATS-01..09
 │   ├── growth.spec.ts        # GROWTH-01..12
-│   ├── export.spec.ts        # EXP-01..12
+│   ├── export.spec.ts        # EXP-01..14（EXP-14 需 RUN_Q25_SPAN=1）
 │   ├── sync.spec.ts          # SYNC-01..20
 │   ├── isolation-security.spec.ts  # ISO-01..05、SEC-01..03
 │   ├── health.spec.ts        # HEALTH-01..03
-│   └── rate-limit.spec.ts    # RL-01..06（独立运行）
+│   ├── rate-limit.spec.ts    # RL-01..06（独立运行）
+│   └── path-normalization.spec.ts  # RL-07..10（RUN_PATH_NORMALIZATION=1，N-7 后执行）
 ├── e2e/
 │   ├── helpers/page.ts       # 捕获设备 ID、独立 API 上下文、页面错误收集
 │   ├── onboarding.spec.ts    # UI-01..03
@@ -115,7 +116,7 @@ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci
 npx playwright test --list
 ```
 
-当前应列出 **156 条 Playwright 用例**（134 条 API + 22 条 E2E）；用例文档共 173 条，其余 17 条为 DB/PERF/COMPAT/MANUAL，不由 Playwright 执行。这只证明配置/用例可加载，不代表功能通过。
+当前应列出 **162 条 Playwright 用例**（140 条 API + 22 条 E2E）；用例文档共 179 条，其余 17 条为 DB/PERF/COMPAT/MANUAL，不由 Playwright 执行。这只证明配置/用例可加载，不代表功能通过。
 
 ---
 
@@ -179,13 +180,14 @@ npm run test:e2e
 npm test
 ```
 
-`npx playwright test --list` 列出 **156 条**：134 条 API + 22 条 E2E。另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
+`npx playwright test --list` 列出 **162 条**：140 条 API + 22 条 E2E。另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
 
 **执行前提**：后端已实现对应接口，且 `DB_PASSWORD`、`REDIS_PASSWORD`、`APP_DEVICE_PEPPER`、`APP_EXPORT_TOKEN_KEY` 与本机 MySQL/Redis 可达。缺少任一条件时 API 套件会在 `beforeEach` 的 Redis/DB 辅助函数处报错，属于环境未就绪，不是断言失败。仅实现 BE-01..BE-03 的后端只能覆盖 GEN/DEV/BABY/HEALTH，其余模块会因 404/校验差异失败。
 
 ### 限流专项
 
-限流用例会耗尽额度，**必须独立运行**，且后端与测试进程使用同一组低阈值：
+限流用例会耗尽额度，**必须独立运行**，且后端与测试进程使用同一组低阈值。
+`api/path-normalization.spec.ts`（Q-26）默认 skip，需 backend-dev 的 N-7 路径规范化修复合入并重启后，额外设置 `RUN_PATH_NORMALIZATION=1` 执行；修复前不得将其判为缺陷。
 
 ```bash
 npm run reset:env

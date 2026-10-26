@@ -11,6 +11,10 @@ import {
 import { execSql, queryOne } from './helpers/db';
 import { deviceHashHex } from './helpers/device-hash';
 import {
+  RATE_LIMIT_EXPORT_PER_HOUR,
+  RUN_Q25_SPAN,
+} from './helpers/env';
+import {
   decodeExportTokenPayload,
   requireExportTokenKey,
   signExpiredExportToken,
@@ -447,18 +451,87 @@ test.describe('CSV 导出（EXP）', () => {
     expect((body.data as { rowCount: number }).rowCount).toBe(10001);
     expect((body.data as { maxRows: number }).maxRows).toBe(10000);
     expect(body.data).not.toHaveProperty('downloadUrl');
+    // Q-25：EXPORT_TOO_LARGE 已经过限流器，返回导出作用域头；预占后回滚，Remaining 不减少。
+    expect(tooLarge.headers()['x-ratelimit-limit']).toBe(
+      String(RATE_LIMIT_EXPORT_PER_HOUR),
+    );
+    expect(tooLarge.headers()['x-ratelimit-remaining']).toBe(
+      String(RATE_LIMIT_EXPORT_PER_HOUR),
+    );
 
     execSql(
       `DELETE FROM feeding_record WHERE baby_id = '${baby.id}' AND record_date = '2026-10-01' LIMIT 1`,
     );
 
-    const exactly = await expectOk<ExportTicket>(
-      await client.post('/exports/feeding-records', {
-        babyId: baby.id,
-        from: '2026-10-01',
-        to: '2026-10-01',
-      }),
-    );
+    const exactlyResponse = await client.post('/exports/feeding-records', {
+      babyId: baby.id,
+      from: '2026-10-01',
+      to: '2026-10-01',
+    });
+    const exactly = await expectOk<ExportTicket>(exactlyResponse);
     expect(exactly.data.rowCount).toBe(10000);
+    // 失败未消耗额度，因此第一次成功签发应为 limit-1。
+    expect(exactlyResponse.headers()['x-ratelimit-remaining']).toBe(
+      String(RATE_LIMIT_EXPORT_PER_HOUR - 1),
+    );
+  });
+
+  test('EXP-13 请求体超过 1MB 返回 PAYLOAD_TOO_LARGE 且不消耗导出配额', async ({
+    request,
+  }) => {
+    const { client, baby } = await setupBaby(request);
+    const limit = RATE_LIMIT_EXPORT_PER_HOUR;
+
+    // MaxBodySizeFilter 在限流器之前拒绝，响应体仍是统一错误包。
+    const oversizedBody = JSON.stringify({
+      babyId: baby.id,
+      from: '2026-10-20',
+      to: '2026-10-20',
+      padding: 'x'.repeat(1024 * 1024 + 1),
+    });
+    const tooLarge = await client.post('/exports/feeding-records', oversizedBody);
+    await expectError(tooLarge, 413, 'PAYLOAD_TOO_LARGE');
+    expect(tooLarge.headers()['x-ratelimit-limit']).toBeUndefined();
+    expect(tooLarge.headers()['x-ratelimit-remaining']).toBeUndefined();
+    expect(tooLarge.headers()['retry-after']).toBeUndefined();
+
+    // 配额未被该 413 消耗：成功签发依次为 limit-1 … 0。
+    const remainingAfterSuccess: string[] = [];
+    for (let index = 0; index < limit; index += 1) {
+      const response = await client.post('/exports/feeding-records', {
+        babyId: baby.id,
+        from: '2026-10-20',
+        to: '2026-10-20',
+      });
+      await expectOk<ExportTicket>(response);
+      expect(response.headers()['x-ratelimit-limit']).toBe(String(limit));
+      remainingAfterSuccess.push(response.headers()['x-ratelimit-remaining']);
+    }
+    expect(remainingAfterSuccess).toEqual(
+      Array.from({ length: limit }, (_, index) => String(limit - index - 1)),
+    );
+  });
+
+  test('EXP-14 跨度超过 366 天返回 EXPORT_TOO_LARGE 且不消耗导出配额', async ({
+    request,
+  }) => {
+    test.skip(
+      !RUN_Q25_SPAN,
+      'Q-25 §8.3 要求 367 天跨度返回 413 EXPORT_TOO_LARGE，但主契约 §4.9 与 EXP-09 当前约定 400 VALIDATION_ERROR；待裁定并调整后端后设 RUN_Q25_SPAN=1',
+    );
+    const { client, baby } = await setupBaby(request);
+    const limit = RATE_LIMIT_EXPORT_PER_HOUR;
+    const tooLarge = await client.post('/exports/feeding-records', {
+      babyId: baby.id,
+      from: '2025-10-19',
+      to: '2026-10-20',
+    });
+    await expectError(tooLarge, 413, 'EXPORT_TOO_LARGE');
+    expect(tooLarge.headers()['x-ratelimit-limit']).toBe(String(limit));
+    expect(tooLarge.headers()['x-ratelimit-remaining']).toBe(String(limit));
+
+    const after = await requestExport(client, baby.id);
+    await expectOk<ExportTicket>(after);
+    expect(after.headers()['x-ratelimit-remaining']).toBe(String(limit - 1));
   });
 });

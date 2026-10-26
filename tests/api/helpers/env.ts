@@ -37,6 +37,12 @@ export const RATE_LIMIT_SYNC_PER_MINUTE = intEnv('APP_RATE_LIMIT_SYNC_PER_MINUTE
 /** 限流专项开关；只有独立一轮才置 1。 */
 export const RUN_RATE_LIMIT = process.env.RUN_RATE_LIMIT === '1';
 
+/** Q-26 路径规范化专项开关；N-7 合入并重启后置 1。 */
+export const RUN_PATH_NORMALIZATION = process.env.RUN_PATH_NORMALIZATION === '1';
+
+/** Q-25 跨度超限 413 专项开关；后端将 >366 天改判 EXPORT_TOO_LARGE 后置 1。 */
+export const RUN_Q25_SPAN = process.env.RUN_Q25_SPAN === '1';
+
 /** 导出 token TTL 固定 300 秒，生产不可配（Q-16）。 */
 export const EXPORT_TOKEN_TTL_SECONDS = 300;
 
