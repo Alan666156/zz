@@ -1,9 +1,9 @@
 package com.zz.babyfeeding.health;
 
+import com.zz.babyfeeding.common.api.ApiResponse;
+import com.zz.babyfeeding.common.api.ErrorCode;
 import com.zz.babyfeeding.common.util.TimeUtils;
-import com.zz.babyfeeding.common.util.UuidUtils;
 import com.zz.babyfeeding.config.AppProperties;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.http.HttpStatus;
@@ -24,8 +24,6 @@ import java.util.Map;
 @RequestMapping("/api/v1/health")
 public class HealthController {
 
-    private static final String REQUEST_ID_ATTRIBUTE = "zz.requestId";
-
     private final JdbcTemplate jdbcTemplate;
     private final RedisConnectionFactory redisConnectionFactory;
     private final AppProperties appProperties;
@@ -39,10 +37,7 @@ public class HealthController {
     }
 
     @GetMapping
-    public ResponseEntity<Map<String, Object>> health(HttpServletRequest request) {
-        String requestId = resolveRequestId(request);
-        request.setAttribute(REQUEST_ID_ATTRIBUTE, requestId);
-
+    public ResponseEntity<ApiResponse<Object>> health() {
         Map<String, Object> checks = new LinkedHashMap<>();
         checks.put("db", checkDb());
         checks.put("redis", checkRedis());
@@ -54,14 +49,9 @@ public class HealthController {
         data.put("version", appProperties.getVersion());
         data.put("serverTime", TimeUtils.serverTime());
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", up ? "OK" : "SERVICE_UNAVAILABLE");
-        body.put("message", up ? "success" : "服务依赖不可用");
-        body.put("data", data);
-        body.put("requestId", requestId);
-        body.put("serverTime", TimeUtils.serverTime());
-
-        request.setAttribute("zz.requestId", requestId);
+        ApiResponse<Object> body = up
+                ? ApiResponse.ok(data)
+                : ApiResponse.error(ErrorCode.SERVICE_UNAVAILABLE, data);
         return ResponseEntity.status(up ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
@@ -114,14 +104,5 @@ public class HealthController {
     private static boolean isUp(Map<String, Object> checks) {
         return checks.values().stream()
                 .allMatch(check -> "UP".equals(((Map<?, ?>) check).get("status")));
-    }
-
-    private static String resolveRequestId(HttpServletRequest request) {
-        Object existing = request.getAttribute(REQUEST_ID_ATTRIBUTE);
-        if (existing instanceof String value && UuidUtils.isUuid(value)) {
-            return value;
-        }
-        String header = request.getHeader("X-Request-Id");
-        return UuidUtils.isUuid(header) ? header : UuidUtils.newUuidV4();
     }
 }
