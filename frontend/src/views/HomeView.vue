@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page home">
+  <div class="page home" data-testid="home-page">
     <template v-if="activeBaby">
       <BabyCard :baby="activeBaby" active @click="showSwitcher = true" />
       <DailySummaryCard :summary="feedingStore.todaySummary" :loading="feedingStore.loading" />

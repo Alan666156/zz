@@ -103,7 +103,7 @@ function handleConfirmDelete(): void {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" data-testid="profile-page">
     <section class="profile-hero card">
       <div>
         <p class="profile-hero__title">我的</p>

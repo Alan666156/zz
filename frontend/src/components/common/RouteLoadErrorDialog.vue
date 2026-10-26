@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ROUTE_LOAD_ERROR_CANCEL,
@@ -18,18 +18,28 @@ const message = computed(() =>
   ui.routeLoadErrorOffline ? ROUTE_LOAD_ERROR_OFFLINE : ROUTE_LOAD_ERROR_GENERIC,
 )
 
+/** 重试期间禁用按钮，避免连点产生多个并发导航（FE-11） */
+const retrying = ref(false)
+
 function cancel(): void {
+  if (retrying.value) return
   ui.dismissRouteLoadError()
 }
 
-function retry(): void {
+async function retry(): Promise<void> {
   const target = ui.routeLoadErrorTarget
-  ui.dismissRouteLoadError()
-  if (!target) return
-  // 失败会再次触发同一个对话框；非 chunk 错误交给全局错误处理
-  void navigateSafely(router, target).catch((error) => {
+  if (!target || retrying.value) return
+  retrying.value = true
+  try {
+    // 用 replace 重试，避免失败导航在历史栈留下重复条目；失败时对话框保持展示
+    const navigated = await navigateSafely(router, target, { replace: true })
+    if (navigated) ui.dismissRouteLoadError()
+  } catch (error) {
+    // 非 chunk 异常交给全局错误处理，不作为本对话框的失败
     console.error('[router] navigation error', error)
-  })
+  } finally {
+    retrying.value = false
+  }
 }
 </script>
 
@@ -45,10 +55,22 @@ function retry(): void {
       <h2 class="route-load-error__title">{{ ROUTE_LOAD_ERROR_TITLE }}</h2>
       <p class="route-load-error__message">{{ message }}</p>
       <div class="route-load-error__actions">
-        <van-button block data-testid="route-load-cancel" @click="cancel">
+        <van-button
+          block
+          :disabled="retrying"
+          data-testid="route-load-cancel"
+          @click="cancel"
+        >
           {{ ROUTE_LOAD_ERROR_CANCEL }}
         </van-button>
-        <van-button block type="primary" data-testid="route-load-retry" @click="retry">
+        <van-button
+          block
+          type="primary"
+          :loading="retrying"
+          :disabled="retrying"
+          data-testid="route-load-retry"
+          @click="retry"
+        >
           {{ ROUTE_LOAD_ERROR_RETRY }}
         </van-button>
       </div>
