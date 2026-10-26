@@ -149,6 +149,9 @@ export interface OutboxItem {
   nextRetryAt: string
   attemptCount: number
   lastError?: string
+  /** REJECTED / 不可重试错误：保留本地，等待用户修改后重新入队 */
+  failed?: boolean
+  failedAt?: string
 }
 
 export interface MetaEntry {

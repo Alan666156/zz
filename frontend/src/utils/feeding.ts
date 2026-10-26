@@ -132,6 +132,15 @@ export function buildLocalFeedingRecord(
 export function toFeedingSyncData(record: FeedingRecord): Record<string, unknown> {
   return {
     babyId: record.babyId,
+    ...toFeedingPatchData(record),
+  }
+}
+
+/**
+ * PATCH schema 不含 babyId（契约 Q-04）：body 只要出现该字段（含 null）即 400。
+ */
+export function toFeedingPatchData(record: FeedingRecord): Record<string, unknown> {
+  return {
     feedType: record.feedType,
     breastSide: record.breastSide,
     amountValue: record.amountValue,

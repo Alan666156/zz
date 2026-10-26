@@ -4,6 +4,8 @@ import {
   enqueueOutbox,
   getOutboxItem,
   listOutbox,
+  listSyncableOutbox,
+  markOutboxFailed,
   outboxKey,
 } from '@/db/outbox'
 
@@ -99,5 +101,34 @@ describe('outbox', () => {
     const items = await listOutbox()
     expect(items.map((item) => item.entityId)).toEqual(['b', 'a', 'c'])
     expect(await countOutbox('FEEDING_RECORD')).toBe(2)
+  })
+
+  it('失败条目保留在 outbox 但不再自动重试；重新编辑后恢复', async () => {
+    const entityId = '99999999-9999-4999-8999-999999999999'
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId,
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { feedType: 'FORMULA' },
+    })
+    const key = outboxKey('FEEDING_RECORD', entityId)
+    await markOutboxFailed(key, '宝宝不存在')
+
+    expect(await listOutbox()).toHaveLength(1)
+    expect(await listSyncableOutbox()).toHaveLength(0)
+
+    // 用户修改后重新入队：清除失败标记，重新成为可同步候选
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId,
+      op: 'UPSERT',
+      baseRevision: 0,
+      data: { feedType: 'FORMULA', amountValue: 150 },
+    })
+    const item = await getOutboxItem(key)
+    expect(item?.failed).toBe(false)
+    expect(item?.attemptCount).toBe(0)
+    expect(await listSyncableOutbox()).toHaveLength(1)
   })
 })

@@ -32,10 +32,14 @@ export function validateBabyName(raw: string, allowEmpty = false): string | null
   return null
 }
 
+/**
+ * Q-11：服务端按 UTC 今天判定，客户端允许 ±1 天时区容差。
+ * 合法区间 [今天-3年-1天, 今天+1天]，不用本地“今天”硬卡。
+ */
 export function babyBirthDateBounds(now: Date = new Date()): { min: string; max: string } {
-  const max = toLocalDateString(now)
-  const minDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate())
-  return { min: toLocalDateString(minDate), max }
+  const minDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate() - 1)
+  const maxDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  return { min: toLocalDateString(minDate), max: toLocalDateString(maxDate) }
 }
 
 export function validateBirthDate(value: string, now: Date = new Date()): string | null {
@@ -46,7 +50,7 @@ export function validateBirthDate(value: string, now: Date = new Date()): string
     return '出生日期格式不正确'
   }
   const { min, max } = babyBirthDateBounds(now)
-  if (value > max) return '出生日期不能晚于今天'
+  if (value > max) return '出生日期超出允许范围'
   if (value < min) return '暂只支持 3 岁以内的宝宝'
   return null
 }

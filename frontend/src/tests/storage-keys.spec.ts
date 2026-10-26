@@ -27,6 +27,16 @@ describe('Q-15 localStorage keys', () => {
     expect(window.localStorage.getItem('zz.deviceId')).toBeNull()
   })
 
+  it('历史大写设备 UUID 归一为小写（Q-13）', () => {
+    const upper = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'
+    window.localStorage.setItem(DEVICE_ID_KEY, upper)
+
+    expect(getOrCreateDeviceId()).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+    expect(window.localStorage.getItem(DEVICE_ID_KEY)).toBe(
+      'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    )
+  })
+
   it('旧当前宝宝 key 自动迁移到 zz.bf.activeBabyId', () => {
     window.localStorage.setItem('zz.activeBabyId', BABY_ID)
 

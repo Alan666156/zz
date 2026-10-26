@@ -21,12 +21,15 @@ describe('validation', () => {
     expect(validateBabyName('a\u0000b')).not.toBeNull()
   })
 
-  it('出生日期范围：今天到 3 年前', () => {
+  it('出生日期范围：今天±1 天容差，最早 3 年 1 天前（Q-11）', () => {
     const now = new Date(2026, 9, 26)
     expect(validateBirthDate('2026-10-26', now)).toBeNull()
-    expect(validateBirthDate('2026-10-27', now)).not.toBeNull()
+    // 客户端允许 +1 天时区容差
+    expect(validateBirthDate('2026-10-27', now)).toBeNull()
+    expect(validateBirthDate('2026-10-28', now)).not.toBeNull()
     expect(validateBirthDate('2023-10-26', now)).toBeNull()
-    expect(validateBirthDate('2023-10-25', now)).not.toBeNull()
+    expect(validateBirthDate('2023-10-25', now)).toBeNull()
+    expect(validateBirthDate('2023-10-24', now)).not.toBeNull()
     expect(validateBirthDate('', now)).not.toBeNull()
     expect(validateBirthDate('2026-02-31', now)).not.toBeNull()
   })

@@ -7,18 +7,24 @@ const LEGACY_DEVICE_ID_KEY = 'zz.deviceId'
 
 let memoryDeviceId: string | null = null
 
-/** 迁移旧版 key，避免升级后丢失设备身份 */
+/**
+ * 迁移旧版 key，避免升级后丢失设备身份。
+ * Q-13：设备 UUID 必须是 canonical v4 小写；历史大写值就地归一，不向上游发送。
+ */
 function readStoredDeviceId(): string | null {
   const current = getStorageItem(DEVICE_ID_KEY)
   if (current && isUuidV4(current)) {
+    const canonical = current.toLowerCase()
+    if (canonical !== current) setStorageItem(DEVICE_ID_KEY, canonical)
     removeStorageItem(LEGACY_DEVICE_ID_KEY)
-    return current
+    return canonical
   }
   const legacy = getStorageItem(LEGACY_DEVICE_ID_KEY)
   if (legacy && isUuidV4(legacy)) {
-    setStorageItem(DEVICE_ID_KEY, legacy)
+    const canonical = legacy.toLowerCase()
+    setStorageItem(DEVICE_ID_KEY, canonical)
     removeStorageItem(LEGACY_DEVICE_ID_KEY)
-    return legacy
+    return canonical
   }
   return null
 }

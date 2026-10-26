@@ -29,9 +29,11 @@ import {
   buildLocalFeedingRecord,
   normalizeFeedingFields,
   summarizeFeedingRecords,
+  toFeedingPatchData,
   toFeedingSyncData,
   validateFeedingInput,
 } from '@/utils/feeding'
+import { requestSync } from '@/utils/sync-events'
 
 export type FeedingMutationStatus = 'synced' | 'pending' | 'conflict' | 'failed'
 
@@ -59,6 +61,11 @@ function sortDesc(records: FeedingRecord[]): FeedingRecord[] {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+/** 在线 GET/PATCH/POST 已软删除记录 → 404（契约 Q-05/Q-06） */
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 404 || error.code === 'NOT_FOUND')
 }
 
 /** 409 CONFLICT 的 data.current 是服务端最新记录 */
@@ -316,7 +323,7 @@ export const useFeedingStore = defineStore('feeding', {
       try {
         const server = await patchFeedingRecordRequest(record.id, {
           baseRevision: record.revision,
-          ...toFeedingSyncData(updated),
+          ...toFeedingPatchData(updated),
         })
         await this.applyServerRecord(server)
         this.lastError = null
@@ -331,8 +338,15 @@ export const useFeedingStore = defineStore('feeding', {
             message: '该记录已在其他端更新',
           }
         }
+        if (isNotFoundError(error)) {
+          await removeOutbox(outboxKey('FEEDING_RECORD', record.id)).catch(() => undefined)
+          await this.applySyncedDeletion(record.id)
+          this.lastError = '记录已不存在，已从本机移除'
+          return { status: 'conflict', message: this.lastError }
+        }
         if (isRetryableApiError(error)) {
           this.lastError = errorMessage(error, '网络不可用，修改待同步')
+          requestSync()
           return { status: 'pending', record: updated, message: this.lastError }
         }
         await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
@@ -381,8 +395,15 @@ export const useFeedingStore = defineStore('feeding', {
           await this.applyServerRecord(current)
           return { status: 'conflict', record: current, message: '该记录已在其他端更新' }
         }
+        if (isNotFoundError(error)) {
+          // 在线接口对已删除资源返回 404；本地已经隐藏，视为删除成功
+          await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
+          await this.refreshPendingCount()
+          return { status: 'synced' }
+        }
         if (isRetryableApiError(error)) {
           this.lastError = errorMessage(error, '网络不可用，删除待同步')
+          requestSync()
           return { status: 'pending', message: this.lastError }
         }
         await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
@@ -430,16 +451,58 @@ export const useFeedingStore = defineStore('feeding', {
         this.lastError = null
         return true
       } catch (error) {
-        if (!isRetryableApiError(error)) {
+        if (isNotFoundError(error)) {
+          // POST 已删除 id → 404，不复活（契约 Q-05）
+          await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
+          await this.applySyncedDeletion(record.id)
+          this.lastError = '记录已不存在，已从本机移除'
+        } else if (!isRetryableApiError(error)) {
           // 4xx 不自动重试：移出队列，本地保留记录
           await removeOutbox(outboxKey('FEEDING_RECORD', record.id))
           this.lastError = errorMessage(error, '记录同步失败')
         } else {
           this.lastError = errorMessage(error, '网络不可用，记录待同步')
+          requestSync()
         }
         await this.refreshPendingCount()
         return false
       }
+    },
+
+    /** 同步结果直接覆盖本地（APPLIED / DUPLICATE / CONFLICT_SERVER_WINS） */
+    async applySyncedRecord(record: FeedingRecord): Promise<void> {
+      if (record.deletedAt) {
+        await this.applySyncedDeletion(record.id)
+        return
+      }
+      try {
+        await putFeedingRecordCache(record)
+      } catch {
+        // 缓存失败不影响 Pinia
+      }
+      const known = this.records.some((item) => item.id === record.id)
+      if (
+        known ||
+        (record.babyId === this.currentBabyId && record.recordDate === this.currentDate)
+      ) {
+        this.mergeRecords([...this.records, record])
+      }
+      await this.refreshPendingCount()
+    },
+
+    /** tombstone / 在线 404：从缓存与内存中移除，绝不复活 */
+    async applySyncedDeletion(id: string): Promise<void> {
+      try {
+        await deleteFeedingRecordCache(id)
+      } catch {
+        // 忽略缓存删除失败
+      }
+      this.records = this.records.filter((item) => item.id !== id)
+      await this.refreshPendingCount()
+    },
+
+    removeBabyRecords(babyId: string): void {
+      this.records = this.records.filter((item) => item.babyId !== babyId)
     },
   },
 })

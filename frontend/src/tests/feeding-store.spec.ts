@@ -16,7 +16,12 @@ const apiMocks = vi.hoisted(() => ({
   deleteFeedingRecordRequest: vi.fn(),
 }))
 
+const syncMocks = vi.hoisted(() => ({
+  pushSyncBatch: vi.fn(),
+}))
+
 vi.mock('@/api/feeding', () => apiMocks)
+vi.mock('@/api/sync', () => syncMocks)
 
 function formulaInput(): FeedingRecordInput {
   return {
@@ -39,10 +44,12 @@ describe('feeding store + recorder', () => {
     apiMocks.patchFeedingRecordRequest.mockReset()
     apiMocks.deleteFeedingRecordRequest.mockReset()
     apiMocks.listFeedingRecords.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
+    syncMocks.pushSyncBatch.mockReset()
+    syncMocks.pushSyncBatch.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
   })
 
   it('网络请求挂起时，本地保存仍立即完成（≤3 秒）', async () => {
-    apiMocks.createFeedingRecordRequest.mockReturnValue(new Promise(() => undefined))
+    syncMocks.pushSyncBatch.mockReturnValue(new Promise(() => undefined))
     const store = useFeedingStore()
     const today = todayLocalDate()
     store.currentBabyId = 'baby-1'
@@ -62,12 +69,35 @@ describe('feeding store + recorder', () => {
     expect(await listOutbox()).toHaveLength(1)
   })
 
-  it('在线同步成功后更新 revision 并清空 outbox', async () => {
-    apiMocks.createFeedingRecordRequest.mockImplementation(
-      async (input: FeedingRecordInput & { id: string; babyId: string }) => {
-        const local = buildLocalFeedingRecord(input, input.babyId)
-        return { created: true, record: { ...local, id: input.id, revision: 1 } }
-      },
+  it('在线批量同步成功后更新 revision 并清空 outbox', async () => {
+    syncMocks.pushSyncBatch.mockImplementation(
+      async (payload: {
+        batchId: string
+        changes: Array<{
+          entityType: string
+          id: string
+          data?: Record<string, unknown>
+        }>
+      }) => ({
+        batchId: payload.batchId,
+        replayed: false,
+        processedAt: new Date().toISOString(),
+        results: payload.changes.map((change) => {
+          const { babyId, ...rest } = change.data ?? {}
+          const local = buildLocalFeedingRecord(
+            rest as unknown as FeedingRecordInput,
+            String(babyId),
+          )
+          return {
+            entityType: change.entityType,
+            id: change.id,
+            status: 'APPLIED',
+            revision: 1,
+            record: { ...local, id: change.id, revision: 1 },
+          }
+        }),
+        summary: { applied: 1, duplicate: 0, conflict: 0, rejected: 0 },
+      }),
     )
     const store = useFeedingStore()
     store.currentBabyId = 'baby-1'
@@ -75,9 +105,8 @@ describe('feeding store + recorder', () => {
 
     const recorder = useFeedingRecorder()
     await recorder.save(formulaInput(), 'baby-1')
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(() => expect(store.records[0].revision).toBe(1))
 
-    expect(store.records[0].revision).toBe(1)
     expect(await listOutbox()).toHaveLength(0)
     expect(store.lastError).toBeNull()
   })
@@ -106,6 +135,9 @@ describe('feeding store + recorder', () => {
       synced.id,
       expect.objectContaining({ baseRevision: 1, amountValue: 150 }),
     )
+    // Q-04：PATCH body 不允许出现 babyId（含 null）
+    const patchPayload = apiMocks.patchFeedingRecordRequest.mock.calls[0][1]
+    expect(patchPayload).not.toHaveProperty('babyId')
   })
 
   it('编辑冲突 409：用服务端 data.current 覆盖并提示', async () => {

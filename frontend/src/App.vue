@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useOfflineSync } from '@/composables/useOfflineSync'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
+useOfflineSync()
 </script>
 
 <template>

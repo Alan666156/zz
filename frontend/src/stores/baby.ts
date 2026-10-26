@@ -17,6 +17,7 @@ import {
 import { enqueueOutbox, outboxKey, removeOutbox } from '@/db/outbox'
 import { MAX_BABIES, type Baby, type BabyInput } from '@/types/models'
 import { getStorageItem, removeStorageItem, setStorageItem } from '@/utils/storage'
+import { requestSync } from '@/utils/sync-events'
 import { uuidV4 } from '@/utils/uuid'
 import { validateBabyName, validateBirthDate } from '@/utils/validation'
 
@@ -236,6 +237,7 @@ export const useBabyStore = defineStore('baby', {
           data: toSyncData(localBaby),
         })
         this.lastError = errorMessage(error, '网络异常，宝宝已保存到本机')
+        requestSync()
         return localBaby
       }
     },
@@ -291,6 +293,11 @@ export const useBabyStore = defineStore('baby', {
         this.lastError = null
         return serverBaby
       } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          // 在线 PATCH 已删除宝宝 → 404，从本机移除（契约 Q-06）
+          await this.applySyncedBabyDeletion(id)
+          throw new Error('宝宝已不存在，已从本机移除')
+        }
         if (!isRetryableApiError(error)) {
           this.babies = snapshot
           this.ensureActive()
@@ -305,6 +312,7 @@ export const useBabyStore = defineStore('baby', {
           data: toSyncData(updated),
         })
         this.lastError = errorMessage(error, '网络异常，修改已保存到本机')
+        requestSync()
         return updated
       }
     },
@@ -363,6 +371,47 @@ export const useBabyStore = defineStore('baby', {
           baseRevision: current.revision,
         })
         this.lastError = errorMessage(error, '网络异常，删除将在联网后同步')
+        requestSync()
+      }
+    },
+
+    /** sync 结果覆盖本地宝宝（APPLIED / DUPLICATE / CONFLICT_SERVER_WINS） */
+    async applySyncedBaby(baby: Baby): Promise<void> {
+      if (baby.deletedAt) {
+        await this.applySyncedBabyDeletion(baby.id)
+        return
+      }
+      this.upsertLocal(baby)
+      try {
+        await putBabiesCache(this.babies)
+      } catch {
+        // 缓存失败不影响 Pinia
+      }
+    },
+
+    /** sync tombstone：宝宝及其记录一并从本地清除，绝不复活 */
+    async applySyncedBabyDeletion(id: string): Promise<void> {
+      this.babies = this.babies.filter((baby) => baby.id !== id)
+      this.ensureActive()
+      try {
+        await deleteBabyCache(id)
+      } catch {
+        // 忽略
+      }
+      try {
+        await deleteFeedingRecordsByBaby(id)
+      } catch {
+        // 忽略
+      }
+      try {
+        await deleteGrowthRecordsByBaby(id)
+      } catch {
+        // 忽略
+      }
+      try {
+        await replaceBabiesCache(this.babies)
+      } catch {
+        // 忽略
       }
     },
   },

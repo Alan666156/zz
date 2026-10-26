@@ -75,9 +75,13 @@ describe('growth utils', () => {
     expect(
       validateGrowthInput({ measuredOn: '2026-02-28', weightKg: 8 }, '2026-03-01', NOW),
     ).toContain('出生日期')
+    // Q-11：允许 +1 天时区容差
     expect(
       validateGrowthInput({ measuredOn: '2026-10-27', weightKg: 8 }, '2026-03-01', NOW),
-    ).toContain('今天')
+    ).toBeNull()
+    expect(
+      validateGrowthInput({ measuredOn: '2026-10-28', weightKg: 8 }, '2026-03-01', NOW),
+    ).toContain('允许范围')
     expect(
       validateGrowthInput(
         { measuredOn: '2026-10-20', weightKg: 8, note: 'a'.repeat(201) },

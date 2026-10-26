@@ -48,7 +48,8 @@ export async function enqueueOutbox(input: EnqueueInput): Promise<EnqueueResult>
         baseRevision: existing ? existing.baseRevision : input.baseRevision,
         createdAt: existing?.createdAt ?? nowIso,
         nextRetryAt: nowIso,
-        attemptCount: existing?.attemptCount ?? 0,
+        attemptCount: 0,
+        failed: false,
       }),
     )
     return 'queued'
@@ -60,6 +61,10 @@ export async function enqueueOutbox(input: EnqueueInput): Promise<EnqueueResult>
       op: 'UPSERT',
       data: input.data,
       nextRetryAt: nowIso,
+      attemptCount: 0,
+      failed: false,
+      lastError: undefined,
+      failedAt: undefined,
     }
     await db.put('outbox', toPlain(merged))
     return 'queued'
@@ -114,4 +119,70 @@ export async function countOutbox(entityType?: SyncEntityType): Promise<number> 
   const items = await db.getAll('outbox')
   if (!entityType) return items.length
   return items.filter((item) => item.entityType === entityType).length
+}
+
+/**
+ * 自动重试候选：未标记失败且已到重试时间。
+ * REJECTED / 4xx 的条目保留在 outbox 但不再自动重试（契约 Q-08、§5.4）。
+ */
+export async function listSyncableOutbox(now: Date = new Date()): Promise<OutboxItem[]> {
+  const items = await listOutbox()
+  const nowIso = now.toISOString()
+  return items.filter((item) => !item.failed && item.nextRetryAt <= nowIso)
+}
+
+/** 网络/5xx/429：保留 outbox，递增尝试次数并写入下一次重试时间 */
+export async function deferOutbox(
+  key: string,
+  nextRetryAt: string,
+  lastError: string,
+): Promise<void> {
+  const db = await getDb()
+  const item = await db.get('outbox', key)
+  if (!item) return
+  await db.put(
+    'outbox',
+    toPlain({
+      ...item,
+      attemptCount: item.attemptCount + 1,
+      nextRetryAt,
+      lastError,
+    }),
+  )
+}
+
+/** REJECTED / 不可重试 4xx：保留本地数据，停止自动重试 */
+export async function markOutboxFailed(key: string, lastError: string): Promise<void> {
+  const db = await getDb()
+  const item = await db.get('outbox', key)
+  if (!item) return
+  const nowIso = new Date().toISOString()
+  await db.put(
+    'outbox',
+    toPlain({
+      ...item,
+      failed: true,
+      failedAt: nowIso,
+      lastError,
+      attemptCount: item.attemptCount + 1,
+    }),
+  )
+}
+
+/** 重置失败标记（用户修改后重新入队时调用；enqueueOutbox 已内置） */
+export async function clearOutboxFailure(key: string): Promise<void> {
+  const db = await getDb()
+  const item = await db.get('outbox', key)
+  if (!item || !item.failed) return
+  await db.put(
+    'outbox',
+    toPlain({
+      ...item,
+      failed: false,
+      failedAt: undefined,
+      lastError: undefined,
+      attemptCount: 0,
+      nextRetryAt: new Date().toISOString(),
+    }),
+  )
 }

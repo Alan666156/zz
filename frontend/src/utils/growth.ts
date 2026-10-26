@@ -4,7 +4,12 @@ import type {
   GrowthRecordInput,
   GrowthTrendPoint,
 } from '@/types/models'
-import { parseLocalDate, todayLocalDate, toLocalDateString } from './date'
+import {
+  addDaysToDateString,
+  parseLocalDate,
+  todayLocalDate,
+  toLocalDateString,
+} from './date'
 import { countChars } from './validation'
 
 export const GROWTH_NOTE_MAX = 200
@@ -97,8 +102,9 @@ function validateMeasuredOn(value: string, birthDate: string, now: Date): string
   if (Number.isNaN(parsed.getTime()) || toLocalDateString(parsed) !== value) {
     return '测量日期格式不正确'
   }
-  const today = todayLocalDate(now)
-  if (value > today) return '测量日期不能晚于今天'
+  // Q-11：允许 +1 天时区容差，不用本地“今天”硬卡
+  const maxDate = addDaysToDateString(todayLocalDate(now), 1)
+  if (value > maxDate) return '测量日期超出允许范围'
   if (birthDate && value < birthDate) return '测量日期不能早于宝宝出生日期'
   return null
 }

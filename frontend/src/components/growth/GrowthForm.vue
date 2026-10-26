@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useGrowthStore } from '@/stores/growth'
 import { useUiStore } from '@/stores/ui'
 import type { GrowthRecord } from '@/types/models'
-import { todayLocalDate } from '@/utils/date'
+import { addDaysToDateString, todayLocalDate } from '@/utils/date'
 import {
   GROWTH_NOTE_MAX,
   validateGrowthForm,
@@ -42,7 +42,8 @@ const errors = reactive<GrowthFieldErrors>({
 const errorText = ref('')
 const saving = ref(false)
 
-const maxDate = todayLocalDate()
+// Q-11：允许 +1 天时区容差
+const maxDate = addDaysToDateString(todayLocalDate(), 1)
 const title = computed(() => (props.record ? '编辑生长记录' : '新增生长记录'))
 const hasAnyMetric = computed(
   () =>

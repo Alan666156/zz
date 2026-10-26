@@ -19,6 +19,8 @@ export class ApiError extends Error {
   readonly status: number
   readonly data: unknown
   readonly requestId?: string
+  /** 429 / 409 SYNC_IN_PROGRESS 的 Retry-After（秒） */
+  readonly retryAfter?: number
 
   constructor(
     code: string,
@@ -26,6 +28,7 @@ export class ApiError extends Error {
     message: string,
     data?: unknown,
     requestId?: string,
+    retryAfter?: number,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -33,11 +36,19 @@ export class ApiError extends Error {
     this.status = status
     this.data = data
     this.requestId = requestId
+    this.retryAfter = retryAfter
   }
 }
 
 interface RetryableConfig extends InternalAxiosRequestConfig {
   _deviceRetried?: boolean
+}
+
+function parseRetryAfter(headers: unknown): number | undefined {
+  if (!headers || typeof headers !== 'object') return undefined
+  const raw = (headers as Record<string, unknown>)['retry-after']
+  const seconds = Number(raw)
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
 }
 
 function toApiError(error: AxiosError<ApiEnvelope<unknown>>): ApiError {
@@ -50,6 +61,7 @@ function toApiError(error: AxiosError<ApiEnvelope<unknown>>): ApiError {
       body.message || body.code,
       body.data,
       body.requestId,
+      parseRetryAfter(response?.headers),
     )
   }
   if (error.code === 'ECONNABORTED') {
@@ -73,6 +85,7 @@ http.interceptors.response.use(
         body.message || body.code,
         body.data,
         body.requestId,
+        parseRetryAfter(response.headers),
       )
     }
     return response
