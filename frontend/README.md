@@ -23,7 +23,7 @@ npm run check:bundle # preview: http://127.0.0.1:4173
 | `zz.bf.deviceId` | `utils/device.ts` | 设备 UUID v4（小写），首次启动生成；所有 API 请求的 `X-Device-Id` 来源 |
 | `zz.bf.activeBabyId` | `stores/baby.ts` | 当前选中的宝宝 id |
 | `zz.bf.lastFeedType` | `views/HomeView.vue` | 最近选择的喂养类型：`BREAST` / `FORMULA` / `MIXED` / `SOLID` |
-| `zz.bf.syncLock` | 预留（FE-08） | 同步互斥锁，仅同步期间存在；当前版本尚未写入 |
+| `zz.bf.syncLock` | `stores/sync.ts` | 同步互斥锁，仅在不支持 `navigator.locks` 的浏览器作为降级锁写入，TTL 20 秒，同步结束即删除 |
 
 ### 应用本地偏好（非契约字段）
 
@@ -46,6 +46,71 @@ E2E 与排障请只依赖 `zz.bf.*`。
 - `/profile`「设备与数据」展示：宝宝与记录绑定当前设备 ID；清除浏览器数据、更换浏览器/设备或丢失设备 ID 会导致本机数据无法找回，离线未同步记录也会丢失。
 - 无痕/禁用 localStorage 时页面额外提示无法持久保存设备 ID。
 - IndexedDB：`zz-baby-feeding` v1，stores：`outbox`、`babies`、`feedingRecords`、`growthRecords`、`meta`。清空浏览器数据会同时清空 outbox 与缓存。
+
+## 固定文案（FE-07）
+
+以下文案集中定义在 `src/constants/copy.ts`，页面直接引用，**E2E 按原文断言，修改必须同步本节**。
+
+### 数据丢失风险（`/profile` 设备与数据）
+
+无痕模式额外提示（`storageAvailable === false` 时显示）：
+
+> 当前浏览器无法持久保存设备 ID（可能是无痕模式）。关闭无痕模式后才能保留数据。
+
+始终显示的数据丢失风险（`data-testid="profile-data-warning"`）：
+
+> 宝宝与记录绑定当前设备 ID。清除浏览器数据、更换浏览器/设备或丢失设备 ID，都会导致本机数据无法找回；离线期间尚未同步的记录也会一并丢失。请勿在无痕模式长期使用。
+
+### 离线横幅（`data-testid="offline-banner"`）
+
+横幅在所有 tab 页顶部统一渲染，出现条件：离线 / 同步中 / 存在待同步记录。
+
+| 状态 | 文案 |
+| --- | --- |
+| 离线且待同步 0 条 | `当前离线，记录会先保存在本机，联网后自动同步` |
+| 离线且待同步 N 条 | `当前离线，记录会先保存在本机，联网后自动同步（待同步 N 条）` |
+| 在线同步中 | `正在同步 N 条记录…` |
+| 在线、有同步失败 | `有 N 条同步失败，请打开记录修改后重试` |
+| 在线、有待同步 | `待同步 N 条，联网后自动同步` |
+
+### 导出（FE-07 / Q-16）
+
+| 场景 | 文案 |
+| --- | --- |
+| 生成成功后的兜底提示（始终显示） | `若未开始下载，请复制链接到浏览器打开（链接 5 分钟内有效）。` |
+| 一般失败 | `导出失败，请稍后重试。` |
+| 限流（429） | `导出过于频繁（每小时最多 5 次），请稍后再试。` |
+| 数据过大（`EXPORT_TOO_LARGE` 且无 rowCount 时） | `导出数据过多，请缩小日期范围后重试。` |
+| 数据过大且返回 rowCount/maxRows | `导出数据过多（{rowCount} 行，最多 {maxRows} 行），请缩小日期范围。` |
+| 剪贴板不可用 | `当前环境无法自动复制，请长按链接手动复制。` |
+
+说明：下载由浏览器导航/新窗口完成，前端**无法感知**下载是否真正开始，因此兜底提示在每次生成成功后都显示，供用户手动复制链接。
+
+## 离线与同步（FE-08）
+
+### 客户端单飞
+
+`stores/sync.ts` 的 `runExclusive()` 保证同一标签页与跨标签页只有一个同步任务：
+
+1. 浏览器支持 `navigator.locks` 时用 `navigator.locks.request('zz.bf.syncLock', { ifAvailable: true })`，拿不到锁直接返回 `busy`。
+2. 否则退化为 `localStorage['zz.bf.syncLock']` 时间戳锁，TTL 20 秒；释放时只在值仍属于自己时删除，避免误删其他标签页的锁。
+3. 同一 store 实例上并发的 `syncNow()` 复用同一个 Promise；服务端 `SYNC_IN_PROGRESS` 仍作为最终保护。
+
+### 触发点与退避
+
+- 触发：应用启动、`online` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入遇到可重试错误后的 `requestSync()`。
+- 批量：`POST /api/v1/sync/push`，每批 1–50 条，`BABY` 优先、同类型按 `createdAt` 升序。
+- 退避：1s / 2s / 5s / 15s / 60s / 5min，±20% 抖动；429/409 优先遵守 `Retry-After`。
+- 结果处理：
+  - `APPLIED` / `DUPLICATE` / `CONFLICT_SERVER_WINS`：按服务端返回记录覆盖本地缓存与 Pinia，再清 outbox。
+  - 返回记录带 `deletedAt`（tombstone，`/sync/push` 是唯一可能返回它的入口）：删除本地记录与缓存，**绝不复活**。
+  - `REJECTED`：保留本地记录，outbox 项标记 `failed`，不自动重试；用户重新编辑保存后清除失败标记并重新入队。
+  - 网络/5xx/429：`deferOutbox` 记录 `attemptCount` 与 `nextRetryAt`；其他 4xx 业务错误直接标记失败。
+
+### 在线单条接口与 404（Q-05 / Q-06 / Q-07）
+
+- 在线 `GET/PATCH/DELETE` 遇到 404 视为“记录已不存在”：从本机缓存与 Pinia 移除（编辑场景提示“记录已不存在，已从本机移除”）。
+- `PATCH` 请求体**不得**包含 `babyId`（Q-04），前端由 `toFeedingPatchData()` 统一剥离。
 
 ## `data-testid` 清单（Q-14）
 
@@ -148,10 +213,25 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | `profile-add-baby` | 添加宝宝 |
 | `profile-data-warning` | 数据丢失风险提示 |
 
-### 预留（后续任务）
+### 同步状态 / 导出（FE-07 / FE-08）
 
-- 导出（FE-07）：`profile-export`、`export-dialog`、`export-range-start`、`export-range-end`、`export-submit`、`export-fallback-copy`。
-- 同步锁（FE-08）：`zz.bf.syncLock`；不新增 testid。
+| testid | 元素 |
+| --- | --- |
+| `profile-sync-status` | 我的页“同步状态”卡片根节点（网络、待同步、失败、上次同步） |
+| `profile-sync-now` | “立即同步”按钮 |
+| `profile-export` | “导出喂养记录”入口（无当前宝宝时 disabled） |
+| `export-dialog` | 导出弹层根节点 |
+| `export-range-start` / `export-range-end` | 导出起止日期原生 `<input type="date">` |
+| `export-error` | 导出校验/请求错误文案 |
+| `export-submit` | 生成导出链接按钮 |
+| `export-result` | 生成成功后的结果区根节点 |
+| `export-row-count` | 导出条数文案 |
+| `export-link` | 签名下载链接（`<a>`） |
+| `export-download-again` | 再次下载按钮 |
+| `export-copy-link` | 复制链接按钮 |
+| `export-fallback-copy` | 固定兜底文案段落（始终显示于结果区） |
+
+同步锁 `zz.bf.syncLock` 不对外暴露 testid。
 
 ## E2E 选择器示例
 
@@ -166,3 +246,42 @@ await page.getByTestId('stats-chart-canvas').locator('canvas').waitFor()
 ```
 
 Vant Field 包裹的字段（`quick-record-note`、`record-edit-note` 等）取根节点后，再定位内部 `input`/`textarea`。
+
+```ts
+await page.getByTestId('profile-export').click()
+await page.getByTestId('export-range-start').fill('2026-10-01')
+await page.getByTestId('export-range-end').fill('2026-10-20')
+await page.getByTestId('export-submit').click()
+await expect(page.getByTestId('export-fallback-copy')).toHaveText(
+  '若未开始下载，请复制链接到浏览器打开（链接 5 分钟内有效）。',
+)
+```
+
+## 性能预算与兼容性（FE-09）
+
+### 包体预算
+
+`npm run check:bundle` 读取 `dist` 的首屏静态资源（gzip）并与预算比较，超出即退出非 0：
+
+| 资源 | 预算 | 最近一次实测 |
+| --- | --- | --- |
+| 首屏 JS | ≤ 200 KB gzip | 83.2 KB |
+| 首屏 CSS | ≤ 50 KB gzip | 32.1 KB |
+| ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
+
+ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页面视图均为路由级动态 import。
+
+### 兼容性约束
+
+- 目标浏览器：iOS Safari ≥ 15、Android Chrome ≥ 100、微信 WebView（iOS/Android 近两年版本）。
+- `navigator.locks` 缺失时自动降级到 `zz.bf.syncLock` 时间戳锁；`navigator.clipboard` 缺失时提示手动复制。
+- 导出下载使用 `<a target="_blank">` 导航，不使用 `URL.createObjectURL`（微信/iOS WebView 对 blob 下载支持差）。
+- 不使用 `structuredClone`（WebView 版本覆盖不足），写入 IndexedDB 前统一 JSON 拷贝（`toPlain`）。
+- 时间一律用本地时区字符串与 `tzOffsetMinutes` 表达；日期比较允许 ±1 天时区容差（Q-11）。
+- 设备 UUID 存储与请求头统一小写（Q-13），历史大写值读取时归一化。
+
+### 已知限制
+
+- 导出下载是否真正开始无法在前端探测，成功响应后始终显示兜底文案。
+- 生长趋势图取最近 100 条生长记录，超出部分不参与绘图（记录列表仍完整分页）。
+- 在线单条接口（PATCH/DELETE/POST）与批量同步引擎并存：单条路径用于即时反馈，仅在遇到可重试错误时触发 `requestSync()` 交给批量引擎兜底。
