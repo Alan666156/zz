@@ -81,11 +81,15 @@ class FeedingValidatorTest {
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.FORMULA,
                 null, new BigDecimal("500.01"), AmountUnit.ML, null), "amountValue");
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.FORMULA,
+                null, new BigDecimal("501"), AmountUnit.ML, null), "amountValue");
+        assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.FORMULA,
                 null, new BigDecimal("120"), AmountUnit.G, null), "amountUnit");
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.FORMULA,
                 BreastSide.LEFT, new BigDecimal("120"), AmountUnit.ML, null), "breastSide");
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.FORMULA,
                 null, new BigDecimal("120"), AmountUnit.ML, 21_601), "durationSec");
+        assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.FORMULA,
+                null, new BigDecimal("120"), AmountUnit.ML, -1), "durationSec");
     }
 
     @Test
@@ -101,6 +105,8 @@ class FeedingValidatorTest {
                 null, BigDecimal.ZERO, AmountUnit.G, null), "amountValue");
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.SOLID,
                 null, new BigDecimal("2000.01"), AmountUnit.G, null), "amountValue");
+        assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.SOLID,
+                null, new BigDecimal("2500"), AmountUnit.G, null), "amountValue");
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.SOLID,
                 null, new BigDecimal("30"), AmountUnit.ML, null), "amountUnit");
         assertFieldError(() -> FeedingValidator.validateMatrix(FeedingType.SOLID,
@@ -206,6 +212,12 @@ class FeedingValidatorTest {
     }
 
     @Test
+    void rejectsMissingStartedAt() {
+        assertFieldError(() -> FeedingValidator.validateTimes(
+                null, null, BIRTH_DATE, NOW), "startedAt");
+    }
+
+    @Test
     void validatesEndedAtOrderingAndSixHourLimit() {
         assertFieldError(() -> FeedingValidator.validateTimes(START,
                 START.minusSeconds(1), BIRTH_DATE, NOW), "endedAt");
@@ -220,8 +232,19 @@ class FeedingValidatorTest {
         assertFieldError(() -> FeedingValidator.parseStartedAt("2026-10-20T08:00:00"),
                 "startedAt");
         assertFieldError(() -> FeedingValidator.parseStartedAt(null), "startedAt");
+        assertFieldError(() -> FeedingValidator.parseStartedAt("  "), "startedAt");
         assertThat(FeedingValidator.parseEndedAtNullable(null)).isNull();
+        assertThat(FeedingValidator.parseEndedAtNullable("  ")).isNull();
         assertThat(FeedingValidator.parseStartedAt("2026-10-20T00:00:00Z"))
                 .isEqualTo(OffsetDateTime.parse("2026-10-20T00:00:00Z"));
+    }
+
+    @Test
+    void parsesQueryDatesStrictly() {
+        assertThat(FeedingValidator.parseQueryDate("date", "2026-10-20"))
+                .isEqualTo(LocalDate.parse("2026-10-20"));
+        assertFieldError(() -> FeedingValidator.parseQueryDate("date", "2026/10/20"),
+                "date");
+        assertFieldError(() -> FeedingValidator.parseQueryDate("date", null), "date");
     }
 }

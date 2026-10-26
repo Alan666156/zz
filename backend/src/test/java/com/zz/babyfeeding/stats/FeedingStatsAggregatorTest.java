@@ -194,6 +194,65 @@ class FeedingStatsAggregatorTest {
     }
 
     @Test
+    void toleratesUnknownTypesAndSkipsOutOfRangeTrendRows() {
+        FeedingRecordEntity unknown = record("r-unknown", "OTHER",
+                "2026-10-20T08:00:00+08:00", ml("99"), "ML", 60);
+
+        DailyStatsResponse daily = FeedingStatsAggregator.daily(
+                BABY_ID, DAY, List.of(unknown));
+        assertThat(daily.feedingCount()).isEqualTo(1);
+        assertThat(daily.byType().values()).containsExactly(0, 0, 0, 0);
+        assertThat(daily.totalAmountMl().toPlainString()).isEqualTo("0.0");
+        assertThat(daily.totalSolidG().toPlainString()).isEqualTo("0.0");
+        assertThat(daily.totalDurationSec()).isEqualTo(60L);
+        assertThat(daily.totalBreastDurationSec()).isZero();
+        assertThat(daily.avgAmountMl()).isNull();
+
+        FeedingRecordEntity noDate = record("r-nodate", "FORMULA",
+                "2026-10-20T09:00:00+08:00", ml("10"), "ML", 60);
+        noDate.setRecordDate(null);
+        List<FeedingRecordEntity> rows = List.of(
+                record("r-before", "FORMULA", "2026-10-18T09:00:00+08:00",
+                        ml("10"), "ML", 60),
+                noDate,
+                record("r20", "FORMULA", "2026-10-20T10:00:00+08:00",
+                        ml("10"), "ML", null),
+                record("r20-legacy", "OTHER", "2026-10-20T11:00:00+08:00",
+                        ml("99"), "ML", 30),
+                record("r21", "FORMULA", "2026-10-21T10:00:00+08:00",
+                        ml("10"), "ML", null),
+                record("r-after", "FORMULA", "2026-10-23T09:00:00+08:00",
+                        ml("10"), "ML", 60));
+
+        List<TrendPoint> points = FeedingStatsAggregator.trendPoints(
+                DAY, DAY.plusDays(1), rows);
+        assertThat(points).hasSize(2);
+        assertThat(points.get(0).feedingCount()).isEqualTo(2);
+        assertThat(points.get(0).totalAmountMl().toPlainString()).isEqualTo("10.0");
+        assertThat(points.get(0).totalSolidG().toPlainString()).isEqualTo("0.0");
+        assertThat(points.get(0).totalDurationSec()).isEqualTo(30L);
+        assertThat(points.get(0).avgDurationSec()).isEqualTo(30);
+        assertThat(points.get(1).feedingCount()).isEqualTo(1);
+        assertThat(points.get(1).avgDurationSec()).isNull();
+    }
+
+    @Test
+    void lastFeedingTieBreaksOnIdWhenStartedAtIsEqual() {
+        List<FeedingRecordEntity> rows = new java.util.ArrayList<>();
+        rows.add(record("r02", "FORMULA", "2026-10-20T10:00:00+08:00",
+                ml("10"), "ML", 60));
+        rows.add(record("r01", "FORMULA", "2026-10-20T10:00:00+08:00",
+                ml("10"), "ML", 60));
+        rows.add(record("r03", "FORMULA", "2026-10-20T10:00:00+08:00",
+                ml("10"), "ML", 60));
+
+        DailyStatsResponse daily = FeedingStatsAggregator.daily(BABY_ID, DAY, rows);
+
+        assertThat(daily.lastFeedingAt()).isEqualTo("2026-10-20T10:00:00+08:00");
+        assertThat(daily.feedingCount()).isEqualTo(3);
+    }
+
+    @Test
     void averageAmountUsesOneDecimalHalfUp() {
         List<FeedingRecordEntity> rows = List.of(
                 record("r01", "FORMULA", "2026-10-03T08:00:00+08:00",

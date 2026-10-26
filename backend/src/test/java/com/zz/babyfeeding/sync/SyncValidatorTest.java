@@ -135,4 +135,13 @@ class SyncValidatorTest {
                 change("FEEDING_RECORD", "UPSERT", id, 0, data()),
                 change("FEEDING_RECORD", "DELETE", id, 1, null))), "changes");
     }
+
+    @Test
+    void rejectsNullBodyAndNullChanges() {
+        assertFieldError(() -> SyncValidator.validateBatch(null), "body");
+        assertFieldError(() -> SyncValidator.validateBatch(new SyncPushRequest(
+                BATCH_ID, null, java.util.Arrays.asList(
+                        change("BABY", "DELETE", UUID.randomUUID().toString(), 1, null),
+                        null))), "changes");
+    }
 }

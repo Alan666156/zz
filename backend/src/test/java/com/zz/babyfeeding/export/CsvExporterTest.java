@@ -80,11 +80,23 @@ class CsvExporterTest {
     }
 
     @Test
+    void fallsBackToRawCodesAndTreatsBlankAsEmpty() {
+        assertThat(CsvExporter.typeLabel("LEGACY")).isEqualTo("LEGACY");
+        assertThat(CsvExporter.sideLabel("MIDDLE")).isEqualTo("MIDDLE");
+        assertThat(CsvExporter.unitLabel("OZ")).isEqualTo("OZ");
+        assertThat(CsvExporter.typeLabel(null)).isEmpty();
+        assertThat(CsvExporter.sideLabel(" ")).isEmpty();
+        assertThat(CsvExporter.unitLabel(" ")).isEmpty();
+    }
+
+    @Test
     void escapesQuotesCommasAndNewlines() {
         assertThat(CsvExporter.cell("a,b\"c\r\nd"))
                 .isEqualTo("\"a,b\"\"c\r\nd\"");
         assertThat(CsvExporter.cell("小,满")).isEqualTo("\"小,满\"");
         assertThat(CsvExporter.cell("plain")).isEqualTo("plain");
+        assertThat(CsvExporter.cell("say \"hi\"")).isEqualTo("\"say \"\"hi\"\"\"");
+        assertThat(CsvExporter.cell("a\nb")).isEqualTo("\"a\nb\"");
         assertThat(CsvExporter.cell(null)).isEmpty();
     }
 
@@ -107,6 +119,8 @@ class CsvExporterTest {
         assertThat(exporter.tagsLabel("[]")).isEmpty();
         assertThat(exporter.tagsLabel(null)).isEmpty();
         assertThat(exporter.tagsLabel("[\"UNKNOWN\"]")).isEmpty();
+        assertThat(exporter.tagsLabel("[\"SPIT_UP\",null]")).isEqualTo("吐奶");
+        assertThat(exporter.tagsLabel("  ")).isEmpty();
     }
 
     @Test

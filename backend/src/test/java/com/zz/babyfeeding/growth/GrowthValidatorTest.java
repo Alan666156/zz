@@ -102,6 +102,7 @@ class GrowthValidatorTest {
         assertFieldError(() -> GrowthValidator.validateMeasuredOn(
                 BIRTH_DATE.minusDays(1), BIRTH_DATE, TODAY), "measuredOn");
         assertFieldError(() -> GrowthValidator.parseMeasuredOn(null), "measuredOn");
+        assertFieldError(() -> GrowthValidator.parseMeasuredOn("  "), "measuredOn");
         assertFieldError(() -> GrowthValidator.parseMeasuredOn("2026/10/20"), "measuredOn");
     }
 
