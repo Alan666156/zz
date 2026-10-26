@@ -1,0 +1,9 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Local run
+logs/
+.env.local
+*.log

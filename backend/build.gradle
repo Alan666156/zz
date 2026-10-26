@@ -1,0 +1,143 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+    id 'jacoco'
+}
+
+group = 'com.zz'
+version = '1.0.0'
+description = 'Baby feeding app backend (V1.0)'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets {
+    integrationTest {
+        // Default source dirs are src/integrationTest/java and .../resources.
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.apache.commons:commons-pool2'
+    implementation 'com.baomidou:mybatis-plus-spring-boot3-starter:3.5.7'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-mysql'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
+    compileOnly 'org.projectlombok:lombok:1.18.34'
+    annotationProcessor 'org.projectlombok:lombok:1.18.34'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    integrationTestCompileOnly 'org.projectlombok:lombok:1.18.34'
+    integrationTestAnnotationProcessor 'org.projectlombok:lombok:1.18.34'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-parameters']
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs integration tests. Requires local MySQL/Redis.'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter tasks.named('test')
+    maxParallelForks = 1
+}
+
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+jacocoTestReport {
+    // Unit tests alone cannot reach the repository/service branches; the report
+    // must include the MockMvc integration suite (needs local MySQL + Redis).
+    dependsOn tasks.named('test'), tasks.named('integrationTest')
+    executionData tasks.withType(Test)
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = true
+    }
+}
+
+// Run explicitly (it needs MySQL/Redis) with:
+//   ./gradlew integrationTest jacocoTestReport jacocoTestCoverageVerification
+jacocoTestCoverageVerification {
+    dependsOn tasks.named('jacocoTestReport')
+    executionData tasks.withType(Test)
+    violationRules {
+        rule {
+            element = 'BUNDLE'
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.70
+            }
+        }
+        rule {
+            element = 'CLASS'
+            includes = [
+                    'com.zz.babyfeeding.baby.BabyValidator',
+                    'com.zz.babyfeeding.export.CsvExporter',
+                    'com.zz.babyfeeding.export.ExportValidator',
+                    'com.zz.babyfeeding.stats.StatsValidator',
+                    'com.zz.babyfeeding.stats.StatsService',
+                    'com.zz.babyfeeding.stats.FeedingStatsAggregator',
+                    'com.zz.babyfeeding.stats.FeedingStatsAggregator$DayBucket',
+                    'com.zz.babyfeeding.growth.GrowthValidator',
+                    'com.zz.babyfeeding.sync.SyncValidator'
+            ]
+            limit {
+                counter = 'BRANCH'
+                value = 'COVEREDRATIO'
+                minimum = 1.0
+            }
+        }
+        rule {
+            element = 'CLASS'
+            includes = ['com.zz.babyfeeding.feeding.FeedingValidator']
+            // Two guards are unreachable by construction: the enum switch's
+            // synthetic default and the >5-tag limit over a 5-constant enum.
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.99
+            }
+            limit {
+                counter = 'BRANCH'
+                value = 'COVEREDRATIO'
+                minimum = 0.97
+            }
+        }
+    }
+}
