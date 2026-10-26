@@ -81,6 +81,17 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 代码中引用 `SYNC_CONFLICT_COPY`；如需展示冲突条数，必须放在独立的次要文案里，主文案保持不变。
 
+### 路由 chunk 加载失败（FE-11 / Q-24）
+
+模态框（非 toast），标题固定为 `页面加载失败`；按钮为 `重试` / `取消`。
+
+| 场景 | 文案 |
+| --- | --- |
+| 离线（`navigator.onLine === false`） | `当前网络不可用，页面尚未加载，请恢复网络后重试` |
+| 其他/无法判断 | `页面加载失败，请检查网络后重试` |
+
+对话框 `data-testid="route-load-error"`，重试按钮 `route-load-retry`，取消按钮 `route-load-cancel`。失败后当前路由不变，禁止自动重试；重试只由用户点击触发，再次失败继续弹同一对话框。
+
 ### 导出（FE-07 / Q-16）
 
 | 场景 | 文案 |
@@ -132,6 +143,12 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 - 五个 tab 统一用路由 `name` 匹配（`:to="{ name: 'home' }"` 等），不用 `path`。Vant 在 `route` 模式下按 `$route.matched` 的 path/name 判断 active；子路由的父记录 path 是 `''`（解析为 `/`），用 `to="/"` 会让「首页」在所有页面恒为 active，而 Vant 只在非 active 时跳转，导致其他页面点「首页」无效。
 
+### 路由懒加载失败（FE-11 / Q-24）
+
+- P1：`router.onError` + `navigateSafely()`（包装 `push/replace` 的 catch）统一识别 `Failed to fetch dynamically imported module` / `Importing a module script failed` / `ChunkLoadError` 等动态 import 失败，弹出模态框并使用上节固定文案；导航失败时当前路由不变，不自动重试。非 chunk 异常不弹框，仍走全局错误处理（`console.error`）。
+- 懒加载边界：离线仅保证“应用外壳 + 已进入过的路由”可用；从未下载过的 Tab 在离线时不可用，属 V1.1（不引入 Service Worker / modulepreload）。
+- P2 预取：`load` 后 `requestIdleCallback`（Safari/iOS 14 无该 API 时 `setTimeout 2500ms`，timeout 3s）串行 `import()` Records / Stats / Growth / Profile 四个路由组件，只加载模块不挂载；`navigator.onLine === false`、`connection.saveData === true`、`effectiveType` 为 `slow-2g/2g/3g` 时跳过；失败仅 `console.debug`。不预取 ECharts，图表仍随页面挂载按需加载。
+
 ## `data-testid` 清单（Q-14）
 
 约定：E2E 只用 `data-testid`，不依赖 CSS 类名。`{...}` 为动态枚举值。
@@ -144,6 +161,8 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | `offline-banner` | 离线/待同步横幅 |
 | `tabbar` | 底部导航根节点 |
 | `tabbar-home` / `tabbar-records` / `tabbar-stats` / `tabbar-growth` / `tabbar-profile` | 五个底部导航项 |
+| `route-load-error` | 路由 chunk 加载失败模态框（Q-24） |
+| `route-load-retry` / `route-load-cancel` | 上述对话框的「重试」/「取消」按钮 |
 | `quick-record-fab` | 首页悬浮记录按钮 |
 
 ### 首页 / 快速记录
@@ -302,11 +321,13 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 84.4 KB |
-| 首屏 CSS | ≤ 50 KB gzip | 32.1 KB |
+| 首屏 JS | ≤ 200 KB gzip | 86.7 KB |
+| 首屏 CSS | ≤ 50 KB gzip | 33.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 
 ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页面视图均为路由级动态 import。
+
+Q-24 P2 在首屏后 idle 预取的 4 个 Tab chunk（Records / Stats / Growth / Profile）gzip 合计约 **23.0 KB**（9.71 + 3.29 + 4.81 + 5.22 KB，随构建哈希小幅浮动）；预取不计入首屏预算，也不会提前加载 ECharts 分包。
 
 ### 兼容性约束
 

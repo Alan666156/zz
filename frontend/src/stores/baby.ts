@@ -429,8 +429,10 @@ export const useBabyStore = defineStore('baby', {
       this.upsertLocal(baby)
       try {
         await putBabiesCache(this.babies)
+        this.cacheDegraded = false
       } catch {
-        // 缓存失败不影响 Pinia
+        // 缓存失败不影响 Pinia，但必须显式标记（FE-08）
+        this.cacheDegraded = true
       }
       // 服务端设默认时会递增旧默认宝宝的 revision；异步全量对齐，避免之后编辑旧默认宝宝 409（FE-06）
       if (baby.isDefault) void this.refreshFromServer()
@@ -443,27 +445,27 @@ export const useBabyStore = defineStore('baby', {
       try {
         await deleteBabyCache(id)
       } catch {
-        // 忽略
+        this.cacheDegraded = true
       }
       try {
         await deleteFeedingRecordsByBaby(id)
       } catch {
-        // 忽略
+        this.cacheDegraded = true
       }
       try {
         await deleteGrowthRecordsByBaby(id)
       } catch {
-        // 忽略
+        this.cacheDegraded = true
       }
       try {
         await removeOutboxByBaby(id)
       } catch {
-        // 忽略
+        this.lastError = '本机同步状态更新失败，稍后会自动重试'
       }
       try {
         await replaceBabiesCache(this.babies)
       } catch {
-        // 忽略
+        this.cacheDegraded = true
       }
     },
   },

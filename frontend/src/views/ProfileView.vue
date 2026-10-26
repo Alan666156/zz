@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ExportSheet from '@/components/export/ExportSheet.vue'
 import { DATA_LOSS_WARNING, STORAGE_UNAVAILABLE_WARNING } from '@/constants/copy'
+import { navigateSafely } from '@/router/route-load-error'
 import { useBabyStore } from '@/stores/baby'
 import { useDeviceStore } from '@/stores/device'
 import { useSyncStore } from '@/stores/sync'
@@ -60,11 +61,11 @@ function openAdd(): void {
     ui.toast(`最多只能添加 ${MAX_BABIES} 个宝宝`)
     return
   }
-  void router.push({ name: 'baby-new' })
+  void navigateSafely(router, { name: 'baby-new' })
 }
 
 function openEdit(baby: Baby): void {
-  void router.push({ name: 'baby-edit', params: { id: baby.id } })
+  void navigateSafely(router, { name: 'baby-edit', params: { id: baby.id } })
 }
 
 function openDelete(baby: Baby): void {

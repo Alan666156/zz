@@ -321,9 +321,8 @@ export const useSyncStore = defineStore('sync', {
         this.pendingByType = byType
         this.failedCount = items.filter((item) => item.failed).length
       } catch {
-        this.pendingCount = 0
-        this.pendingByType = { BABY: 0, FEEDING_RECORD: 0, GROWTH_RECORD: 0 }
-        this.failedCount = 0
+        // 读不到 outbox 时不能假装「没有待同步」，保留上次计数并显式报错（FE-08）
+        this.lastError = '本机同步队列读取失败，稍后自动重试'
         return
       }
       // 记录页/生长页的“待同步”标记也来自 outbox

@@ -226,8 +226,10 @@ export const useGrowthStore = defineStore('growth', {
         for (const record of merged) {
           try {
             await putGrowthRecordCache(record)
+            this.cacheDegraded = false
           } catch {
-            // 缓存写入失败不影响当前展示
+            // 展示不受影响，但缓存已降级，必须显式标记（FE-08）
+            this.cacheDegraded = true
           }
         }
       } catch (error) {
@@ -418,7 +420,8 @@ export const useGrowthStore = defineStore('growth', {
       try {
         await putGrowthRecordCache(record)
       } catch {
-        // 忽略缓存写入失败
+        // 服务端已成功，缓存失败降级为仅内存，但必须显式标记（FE-08）
+        this.cacheDegraded = true
       }
       if (record.babyId === this.currentBabyId) {
         this.mergeRecords([...this.records, record])
@@ -426,7 +429,7 @@ export const useGrowthStore = defineStore('growth', {
       try {
         await removeOutbox(outboxKey('GROWTH_RECORD', record.id))
       } catch {
-        // 忽略
+        this.lastError = '本机同步状态更新失败，稍后会自动重试'
       }
       await this.refreshPendingCount()
     },
@@ -475,8 +478,10 @@ export const useGrowthStore = defineStore('growth', {
       }
       try {
         await putGrowthRecordCache(record)
+        this.cacheDegraded = false
       } catch {
-        // 缓存失败不影响 Pinia
+        // 缓存失败不影响 Pinia，但必须显式标记（FE-08）
+        this.cacheDegraded = true
       }
       const known = this.records.some((item) => item.id === record.id)
       if (known || record.babyId === this.currentBabyId) {
@@ -490,7 +495,8 @@ export const useGrowthStore = defineStore('growth', {
       try {
         await deleteGrowthRecordCache(id)
       } catch {
-        // 忽略缓存删除失败
+        // 删除失败会让记录在刷新后复活，必须显式标记（FE-08）
+        this.cacheDegraded = true
       }
       this.records = this.records.filter((item) => item.id !== id)
       await this.refreshPendingCount()

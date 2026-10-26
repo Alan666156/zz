@@ -42,3 +42,10 @@ export const EXPORT_LINK_EXPIRED_COPY = '下载链接已过期，请重新导出
 
 /** UI-17 / 契约 §4.7 固定文案，不得改写 */
 export const SYNC_CONFLICT_COPY = '该记录已在其他端更新'
+
+/** Q-24 路由 chunk 加载失败固定文案，E2E 依赖，逐字不得改写 */
+export const ROUTE_LOAD_ERROR_TITLE = '页面加载失败'
+export const ROUTE_LOAD_ERROR_OFFLINE = '当前网络不可用，页面尚未加载，请恢复网络后重试'
+export const ROUTE_LOAD_ERROR_GENERIC = '页面加载失败，请检查网络后重试'
+export const ROUTE_LOAD_ERROR_RETRY = '重试'
+export const ROUTE_LOAD_ERROR_CANCEL = '取消'

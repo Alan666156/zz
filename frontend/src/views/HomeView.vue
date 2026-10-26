@@ -7,6 +7,7 @@ import DailySummaryCard from '@/components/record/DailySummaryCard.vue'
 import FeedingTimeline from '@/components/record/FeedingTimeline.vue'
 import QuickRecordFab from '@/components/record/QuickRecordFab.vue'
 import QuickRecordSheet from '@/components/record/QuickRecordSheet.vue'
+import { navigateSafely } from '@/router/route-load-error'
 import { useBabyStore } from '@/stores/baby'
 import { useFeedingStore } from '@/stores/feeding'
 import type { BreastSide, FeedingRecord, FeedingType } from '@/types/models'
@@ -109,7 +110,7 @@ function handleTypeChange(feedType: FeedingType): void {
 }
 
 function openAddBaby(): void {
-  void router.push({ name: 'baby-new' })
+  void navigateSafely(router, { name: 'baby-new' })
 }
 
 onMounted(() => {

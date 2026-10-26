@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import BabyForm from '@/components/baby/BabyForm.vue'
+import { navigateSafely } from '@/router/route-load-error'
 import { useBabyStore } from '@/stores/baby'
 import { useDeviceStore } from '@/stores/device'
 import { useUiStore } from '@/stores/ui'
@@ -37,7 +38,7 @@ async function handleSubmit(payload: Payload): Promise<void> {
     } else {
       ui.toast('欢迎使用')
     }
-    await router.replace({ name: 'home' })
+    await navigateSafely(router, { name: 'home' }, { replace: true })
   } catch (error) {
     errorText.value = error instanceof Error ? error.message : '创建失败，请稍后重试'
   } finally {
