@@ -78,23 +78,28 @@ defineExpose({ validate })
 </script>
 
 <template>
-  <div class="baby-form">
+  <div class="baby-form" data-testid="baby-form">
     <van-cell-group inset class="baby-form__group">
-      <van-field
-        v-model="name"
-        label="昵称"
-        placeholder="例如：小满"
-        maxlength="40"
-        clearable
-        :error-message="errors.name"
-      />
+      <van-field label="昵称" :error-message="errors.name">
+        <template #input>
+          <input
+            v-model="name"
+            class="baby-form__name"
+            type="text"
+            autocomplete="off"
+            placeholder="例如：小满"
+            maxlength="40"
+            data-testid="baby-form-name"
+          />
+        </template>
+      </van-field>
 
       <van-field label="性别">
         <template #input>
           <van-radio-group v-model="gender" direction="horizontal">
-            <van-radio name="MALE">男宝</van-radio>
-            <van-radio name="FEMALE">女宝</van-radio>
-            <van-radio name="UNKNOWN">暂不设置</van-radio>
+            <van-radio name="MALE" data-testid="baby-form-gender-male">男宝</van-radio>
+            <van-radio name="FEMALE" data-testid="baby-form-gender-female">女宝</van-radio>
+            <van-radio name="UNKNOWN" data-testid="baby-form-gender-unknown">暂不设置</van-radio>
           </van-radio-group>
         </template>
       </van-field>
@@ -107,13 +112,14 @@ defineExpose({ validate })
             type="date"
             :min="bounds.min"
             :max="bounds.max"
+            data-testid="baby-form-birth-date"
           />
         </template>
       </van-field>
 
       <van-cell v-if="showDefault" title="设为默认宝宝">
         <template #right-icon>
-          <van-switch v-model="isDefault" size="20px" />
+          <van-switch v-model="isDefault" size="20px" data-testid="baby-form-default" />
         </template>
       </van-cell>
     </van-cell-group>
@@ -124,6 +130,7 @@ defineExpose({ validate })
       block
       round
       :loading="loading"
+      data-testid="baby-form-submit"
       @click="handleSubmit"
     >
       {{ submitText }}
@@ -137,6 +144,7 @@ defineExpose({ validate })
   overflow: hidden;
 }
 
+.baby-form__name,
 .baby-form__date {
   width: 100%;
   border: 0;

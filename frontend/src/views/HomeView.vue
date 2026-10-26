@@ -10,12 +10,15 @@ import QuickRecordFab from '@/components/record/QuickRecordFab.vue'
 import QuickRecordSheet from '@/components/record/QuickRecordSheet.vue'
 import { useBabyStore } from '@/stores/baby'
 import { useFeedingStore } from '@/stores/feeding'
-import type { BreastSide, FeedingRecord } from '@/types/models'
+import type { BreastSide, FeedingRecord, FeedingType } from '@/types/models'
 import { todayLocalDate } from '@/utils/date'
-import { getStorageItem, setStorageItem } from '@/utils/storage'
+import { getStorageItem, removeStorageItem, setStorageItem } from '@/utils/storage'
 
-const LAST_SIDE_KEY = 'zz.lastBreastSide'
-const LAST_AMOUNT_KEY = 'zz.lastFormulaAmount'
+const LAST_SIDE_KEY = 'zz.bf.lastBreastSide'
+const LAST_AMOUNT_KEY = 'zz.bf.lastFormulaAmount'
+const LAST_FEED_TYPE_KEY = 'zz.bf.lastFeedType'
+const LEGACY_LAST_SIDE_KEY = 'zz.lastBreastSide'
+const LEGACY_LAST_AMOUNT_KEY = 'zz.lastFormulaAmount'
 
 const router = useRouter()
 const babyStore = useBabyStore()
@@ -24,6 +27,22 @@ const feedingStore = useFeedingStore()
 const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine !== false)
 const showSwitcher = ref(false)
 const showRecord = ref(false)
+
+/** 迁移旧版本地偏好 key */
+function readMigrated(key: string, legacyKey: string): string | null {
+  const current = getStorageItem(key)
+  if (current !== null) {
+    removeStorageItem(legacyKey)
+    return current
+  }
+  const legacy = getStorageItem(legacyKey)
+  if (legacy !== null) {
+    setStorageItem(key, legacy)
+    removeStorageItem(legacyKey)
+    return legacy
+  }
+  return null
+}
 
 function parseSide(value: string | null): BreastSide {
   return value === 'LEFT' || value === 'RIGHT' || value === 'BOTH' ? value : 'LEFT'
@@ -35,8 +54,19 @@ function parseAmount(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-const lastSide = ref<BreastSide>(parseSide(getStorageItem(LAST_SIDE_KEY)))
-const lastAmount = ref<number | null>(parseAmount(getStorageItem(LAST_AMOUNT_KEY)))
+function parseFeedType(value: string | null): FeedingType {
+  return value === 'BREAST' || value === 'FORMULA' || value === 'MIXED' || value === 'SOLID'
+    ? value
+    : 'BREAST'
+}
+
+const lastSide = ref<BreastSide>(
+  parseSide(readMigrated(LAST_SIDE_KEY, LEGACY_LAST_SIDE_KEY)),
+)
+const lastAmount = ref<number | null>(
+  parseAmount(readMigrated(LAST_AMOUNT_KEY, LEGACY_LAST_AMOUNT_KEY)),
+)
+const lastFeedType = ref<FeedingType>(parseFeedType(getStorageItem(LAST_FEED_TYPE_KEY)))
 
 const activeBaby = computed(() => babyStore.activeBaby)
 const pendingTotal = computed(
@@ -69,6 +99,8 @@ function handleOffline(): void {
 }
 
 function handleSaved(record: FeedingRecord): void {
+  lastFeedType.value = record.feedType
+  setStorageItem(LAST_FEED_TYPE_KEY, record.feedType)
   if (record.breastSide) {
     lastSide.value = record.breastSide
     setStorageItem(LAST_SIDE_KEY, record.breastSide)
@@ -77,6 +109,11 @@ function handleSaved(record: FeedingRecord): void {
     lastAmount.value = record.amountValue
     setStorageItem(LAST_AMOUNT_KEY, String(record.amountValue))
   }
+}
+
+function handleTypeChange(feedType: FeedingType): void {
+  lastFeedType.value = feedType
+  setStorageItem(LAST_FEED_TYPE_KEY, feedType)
 }
 
 function openAddBaby(): void {
@@ -129,8 +166,10 @@ onBeforeUnmount(() => {
       v-model:show="showRecord"
       :baby-id="activeBaby.id"
       :default-side="lastSide"
+      :default-feed-type="lastFeedType"
       :last-amount="lastAmount"
       @saved="handleSaved"
+      @type-change="handleTypeChange"
     />
   </div>
 </template>

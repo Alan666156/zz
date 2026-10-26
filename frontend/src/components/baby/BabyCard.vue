@@ -17,7 +17,13 @@ const initial = computed(() => Array.from(props.baby.name)[0] ?? '宝')
 </script>
 
 <template>
-  <button class="baby-card" :class="{ 'baby-card--active': active }" type="button" @click="$emit('click')">
+  <button
+    class="baby-card"
+    :class="{ 'baby-card--active': active }"
+    type="button"
+    data-testid="baby-card"
+    @click="$emit('click')"
+  >
     <span class="baby-card__avatar">{{ initial }}</span>
     <span class="baby-card__main">
       <span class="baby-card__name-row">

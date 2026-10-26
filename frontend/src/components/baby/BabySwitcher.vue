@@ -53,6 +53,7 @@ function add(): void {
         type="button"
         class="switcher__item"
         :class="{ 'switcher__item--active': baby.id === activeId }"
+        data-testid="baby-switcher-item"
         @click="select(baby.id)"
       >
         <span class="switcher__main">
@@ -66,7 +67,16 @@ function add(): void {
       </button>
 
       <div v-if="canAddMore" class="switcher__add">
-        <van-button block plain type="primary" round @click="add">添加宝宝</van-button>
+        <van-button
+          block
+          plain
+          type="primary"
+          round
+          data-testid="baby-switcher-add"
+          @click="add"
+        >
+          添加宝宝
+        </van-button>
       </div>
       <p v-else class="switcher__hint text-secondary">最多 5 个宝宝</p>
     </div>

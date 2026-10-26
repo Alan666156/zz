@@ -63,7 +63,7 @@ const { error } = useChart(container, option)
 
 <template>
   <div class="growth-chart" data-testid="growth-chart">
-    <div ref="container" class="growth-chart__canvas"></div>
+    <div ref="container" class="growth-chart__canvas" data-testid="growth-chart-canvas"></div>
     <p v-if="error" class="growth-chart__error">{{ error }}</p>
   </div>
 </template>

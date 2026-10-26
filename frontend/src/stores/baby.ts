@@ -20,7 +20,25 @@ import { getStorageItem, removeStorageItem, setStorageItem } from '@/utils/stora
 import { uuidV4 } from '@/utils/uuid'
 import { validateBabyName, validateBirthDate } from '@/utils/validation'
 
-export const ACTIVE_BABY_KEY = 'zz.activeBabyId'
+/** Q-15 固定 key */
+export const ACTIVE_BABY_KEY = 'zz.bf.activeBabyId'
+const LEGACY_ACTIVE_BABY_KEY = 'zz.activeBabyId'
+
+/** 迁移旧版 key，避免升级后忘记当前宝宝 */
+function readStoredActiveBabyId(): string | null {
+  const current = getStorageItem(ACTIVE_BABY_KEY)
+  if (current) {
+    removeStorageItem(LEGACY_ACTIVE_BABY_KEY)
+    return current
+  }
+  const legacy = getStorageItem(LEGACY_ACTIVE_BABY_KEY)
+  if (legacy) {
+    setStorageItem(ACTIVE_BABY_KEY, legacy)
+    removeStorageItem(LEGACY_ACTIVE_BABY_KEY)
+    return legacy
+  }
+  return null
+}
 
 function cloneBabies(list: Baby[]): Baby[] {
   return list.map((baby) => ({ ...baby }))
@@ -51,7 +69,7 @@ function errorMessage(error: unknown, fallback: string): string {
 export const useBabyStore = defineStore('baby', {
   state: () => ({
     babies: [] as Baby[],
-    activeBabyId: getStorageItem(ACTIVE_BABY_KEY),
+    activeBabyId: readStoredActiveBabyId(),
     loaded: false,
     loading: false,
     refreshing: false,

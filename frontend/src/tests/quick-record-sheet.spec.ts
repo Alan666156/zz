@@ -130,6 +130,14 @@ describe('QuickRecordSheet', () => {
     vi.useRealTimers()
   })
 
+  it('切换类型时发出 type-change，供首页记录 zz.bf.lastFeedType', async () => {
+    const wrapper = mountSheet()
+    await clickTab(wrapper, '配方奶')
+
+    expect(wrapper.emitted('type-change')).toContainEqual(['FORMULA'])
+    wrapper.unmount()
+  })
+
   it('配方奶未填写奶量时拒绝保存', async () => {
     const wrapper = mountSheet()
     await clickTab(wrapper, '配方奶')

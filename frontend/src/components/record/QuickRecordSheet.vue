@@ -23,10 +23,12 @@ const props = withDefaults(
     show: boolean
     babyId: string
     defaultSide?: BreastSide
+    defaultFeedType?: FeedingType
     lastAmount?: number | null
   }>(),
   {
     defaultSide: 'LEFT',
+    defaultFeedType: 'BREAST',
     lastAmount: null,
   },
 )
@@ -34,6 +36,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (event: 'update:show', value: boolean): void
   (event: 'saved', record: FeedingRecord): void
+  (event: 'type-change', feedType: FeedingType): void
 }>()
 
 const recorder = useFeedingRecorder()
@@ -55,7 +58,7 @@ watch(
   () => props.show,
   (visible) => {
     if (!visible) return
-    feedType.value = 'BREAST'
+    feedType.value = props.defaultFeedType
     side.value = props.defaultSide
     amount.value = null
     durationSec.value = 0
@@ -69,6 +72,7 @@ watch(
 
 watch(feedType, (next, previous) => {
   errorText.value = ''
+  emit('type-change', next)
   if (next !== 'BREAST' && next !== 'MIXED') {
     durationSec.value = 0
     startedAt.value = null

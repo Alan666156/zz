@@ -82,7 +82,12 @@ async function confirmDelete(): Promise<void> {
     </div>
 
     <section class="baby-list">
-      <article v-for="baby in babyStore.babies" :key="baby.id" class="baby-row card">
+      <article
+        v-for="baby in babyStore.babies"
+        :key="baby.id"
+        class="baby-row card"
+        data-testid="profile-baby-row"
+      >
         <button type="button" class="baby-row__main" @click="openEdit(baby)">
           <span class="baby-row__name">
             {{ baby.name }}
@@ -100,12 +105,28 @@ async function confirmDelete(): Promise<void> {
             size="mini"
             plain
             type="primary"
+            data-testid="profile-set-default"
             @click="setDefault(baby)"
           >
             设默认
           </van-button>
-          <van-button size="mini" plain @click="openEdit(baby)">编辑</van-button>
-          <van-button size="mini" plain type="danger" @click="openDelete(baby)">删除</van-button>
+          <van-button
+            size="mini"
+            plain
+            data-testid="profile-edit-baby"
+            @click="openEdit(baby)"
+          >
+            编辑
+          </van-button>
+          <van-button
+            size="mini"
+            plain
+            type="danger"
+            data-testid="profile-delete-baby"
+            @click="openDelete(baby)"
+          >
+            删除
+          </van-button>
         </div>
       </article>
 
@@ -116,6 +137,7 @@ async function confirmDelete(): Promise<void> {
         plain
         type="primary"
         :disabled="!babyStore.canAddMore"
+        data-testid="profile-add-baby"
         @click="openAdd"
       >
         {{ babyStore.canAddMore ? '添加宝宝' : '已达 5 个宝宝上限' }}
@@ -139,8 +161,9 @@ async function confirmDelete(): Promise<void> {
       <p v-if="!deviceStore.storageAvailable" class="device-card__warning">
         当前浏览器无法持久保存设备 ID（可能是无痕模式）。关闭无痕模式后才能保留数据。
       </p>
-      <p class="device-card__note text-secondary">
-        清除浏览器数据会永久丢失当前设备的宝宝与记录，请勿随意清理。
+      <p class="device-card__note text-secondary" data-testid="profile-data-warning">
+        宝宝与记录绑定当前设备 ID。清除浏览器数据、更换浏览器/设备或丢失设备 ID，
+        都会导致本机数据无法找回；离线期间尚未同步的记录也会一并丢失。请勿在无痕模式长期使用。
       </p>
     </section>
 

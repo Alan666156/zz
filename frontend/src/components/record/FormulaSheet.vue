@@ -17,19 +17,27 @@ function handleInput(value: string): void {
   const parsed = Number(value)
   emit('update:amount', Number.isFinite(parsed) ? parsed : null)
 }
+
+function onInput(event: Event): void {
+  const target = event.target as HTMLInputElement | null
+  handleInput(target?.value ?? '')
+}
 </script>
 
 <template>
   <div class="amount">
-    <van-field
-      :model-value="amount === null ? '' : String(amount)"
-      type="number"
-      label="奶量"
-      data-testid="formula-amount-input"
-      placeholder="例如 120"
-      clearable
-      @update:model-value="handleInput"
-    >
+    <van-field label="奶量">
+      <template #input>
+        <input
+          :value="amount === null ? '' : String(amount)"
+          type="number"
+          inputmode="numeric"
+          class="amount__input"
+          placeholder="例如 120"
+          data-testid="formula-amount-input"
+          @input="onInput"
+        />
+      </template>
       <template #extra>
         <span class="amount__unit">ml</span>
       </template>
@@ -53,6 +61,15 @@ function handleInput(value: string): void {
 <style scoped>
 .amount {
   padding-top: 4px;
+}
+
+.amount__input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
 }
 
 .amount__unit {
