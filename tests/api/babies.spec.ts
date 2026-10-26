@@ -158,8 +158,9 @@ test.describe('宝宝档案（BABY）', () => {
       expect(created.data.baby.birthDate).toBe(birthDate);
     }
 
-    const invalidDates = [addDays(today, 2), addDays(addYears(today, -3), -2), '2026/03/01'];
-    for (const birthDate of invalidDates) {
+    // 范围越界 → VALIDATION_ERROR + fieldErrors。
+    const outOfRange = [addDays(today, 2), addDays(addYears(today, -3), -2)];
+    for (const birthDate of outOfRange) {
       const response = await client.post('/babies', { name: '越界宝宝', birthDate });
       const body = await expectError(response, 400, 'VALIDATION_ERROR');
       expect(
@@ -168,6 +169,14 @@ test.describe('宝宝档案（BABY）', () => {
         ),
       ).toBe(true);
     }
+
+    // Q-19：日期字符串无法解析属参数类型错误 → 400 BAD_REQUEST，无 fieldErrors 要求。
+    const malformed = await client.post('/babies', {
+      name: '格式错误',
+      birthDate: '2026/03/01',
+    });
+    await expectError(malformed, 400, 'BAD_REQUEST');
+    expect(malformed.status()).toBeLessThan(500);
   });
 
   test('BABY-06 最多 5 个宝宝', async ({ request }) => {
