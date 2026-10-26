@@ -4,8 +4,8 @@
 
 - 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（Q-26 / N-1 后 181 条）
 - 技术契约：[`../docs/architecture/v1.0-baby-feeding.md`](../docs/architecture/v1.0-baby-feeding.md)
-- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-24，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
-- 当前状态：**TE-05**。`api/**` 141 条与 `e2e/**` 23 条均已实现为可执行断言；最近全量 151 passed / 0 failed / 11 skipped，N-7 合入后路径专项 5/5、受影响回归 42/42、新增 UI-23 定向通过（全量未重跑）。可执行性只表示断言已按契约写好；已知失败与门控项见[`../docs/tests/v1.0-te04-defects.md`](../docs/tests/v1.0-te04-defects.md)。
+- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-27，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
+- 当前状态：**TE-05**。`api/**` 141 条与 `e2e/**` 23 条均已实现为可执行断言；最近全量 151 passed / 0 failed / 11 skipped，N-7 合入后路径专项 5/5、受影响回归 42/42、新增 UI-23 定向通过（全量未重跑）。EXP-09/EXP-14 已按 Q-27 更新，待后端合入重启后执行。可执行性只表示断言已按契约写好；已知失败与门控项见[`../docs/tests/v1.0-te04-defects.md`](../docs/tests/v1.0-te04-defects.md)。
 
 ---
 
@@ -38,7 +38,7 @@ tests/
 │   ├── timezone.spec.ts      # TZ-01..06
 │   ├── stats.spec.ts         # STATS-01..09
 │   ├── growth.spec.ts        # GROWTH-01..12
-│   ├── export.spec.ts        # EXP-01..14（EXP-14 需 RUN_Q25_SPAN=1）
+│   ├── export.spec.ts        # EXP-01..14（EXP-14 覆盖 367 天 413，Q-27）
 │   ├── sync.spec.ts          # SYNC-01..20
 │   ├── isolation-security.spec.ts  # ISO-01..05、SEC-01..03
 │   ├── health.spec.ts        # HEALTH-01..03

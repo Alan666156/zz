@@ -10,10 +10,7 @@ import {
 } from './helpers/csv';
 import { execSql, queryOne } from './helpers/db';
 import { deviceHashHex } from './helpers/device-hash';
-import {
-  RATE_LIMIT_EXPORT_PER_HOUR,
-  RUN_Q25_SPAN,
-} from './helpers/env';
+import { RATE_LIMIT_EXPORT_PER_HOUR } from './helpers/env';
 import {
   decodeExportTokenPayload,
   requireExportTokenKey,
@@ -282,12 +279,13 @@ test.describe('CSV 导出（EXP）', () => {
     const otherDevice = await setupBaby(request);
 
     // Q-20：失败请求预占后回滚，不消耗导出口径；5 次非法请求后 remaining 仍为 5。
+    // Q-27：跨度 367 天改为 413 EXPORT_TOO_LARGE（见 EXP-14），不再属于 400 校验失败。
     for (const payload of [
       { from: '2026-10-20', to: '2026-10-20' },
       { babyId: baby.id },
+      { babyId: baby.id, from: '2026-10-20' },
       { babyId: baby.id, from: '2026-10-21', to: '2026-10-20' },
       { babyId: baby.id, from: '2026/10/20', to: '2026-10-20' },
-      { babyId: baby.id, from: '2025-10-19', to: '2026-10-20' },
     ]) {
       const response = await client.post('/exports/feeding-records', payload);
       await expectError(response, 400, 'VALIDATION_ERROR');
@@ -515,20 +513,30 @@ test.describe('CSV 导出（EXP）', () => {
   test('EXP-14 跨度超过 366 天返回 EXPORT_TOO_LARGE 且不消耗导出配额', async ({
     request,
   }) => {
-    test.skip(
-      !RUN_Q25_SPAN,
-      'Q-25 §8.3 要求 367 天跨度返回 413 EXPORT_TOO_LARGE，但主契约 §4.9 与 EXP-09 当前约定 400 VALIDATION_ERROR；待裁定并调整后端后设 RUN_Q25_SPAN=1',
-    );
     const { client, baby } = await setupBaby(request);
     const limit = RATE_LIMIT_EXPORT_PER_HOUR;
+
+    // Q-27：from/to 合法，仅闭区间跨度 367 天超限；366 天边界由 EXP-09 的成功循环覆盖。
     const tooLarge = await client.post('/exports/feeding-records', {
       babyId: baby.id,
       from: '2025-10-19',
       to: '2026-10-20',
     });
-    await expectError(tooLarge, 413, 'EXPORT_TOO_LARGE');
+    const body = await expectError(tooLarge, 413, 'EXPORT_TOO_LARGE');
+    expect(body.data).toEqual({
+      maxDays: 366,
+      from: '2025-10-19',
+      to: '2026-10-20',
+      spanDays: 367,
+    });
+    expect(body.data).not.toHaveProperty('rowCount');
+    expect(body.data).not.toHaveProperty('maxRows');
+    expect(body.data).not.toHaveProperty('downloadUrl');
+
+    // 该 413 已过限流器：返回导出作用域头、预占回滚、无 Retry-After。
     expect(tooLarge.headers()['x-ratelimit-limit']).toBe(String(limit));
     expect(tooLarge.headers()['x-ratelimit-remaining']).toBe(String(limit));
+    expect(tooLarge.headers()['retry-after']).toBeUndefined();
 
     const after = await requestExport(client, baby.id);
     await expectOk<ExportTicket>(after);
