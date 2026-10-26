@@ -344,9 +344,16 @@ describe('sync store', () => {
     const outcome = await sync.syncNow()
 
     expect(outcome.status).toBe('ok')
-    const firstBatch = syncMocks.pushSyncBatch.mock.calls[0][0] as { batchId: string }
-    const retryBatch = syncMocks.pushSyncBatch.mock.calls[1][0] as { batchId: string }
+    const firstBatch = syncMocks.pushSyncBatch.mock.calls[0][0] as {
+      batchId: string
+      clientTime: string
+    }
+    const retryBatch = syncMocks.pushSyncBatch.mock.calls[1][0] as {
+      batchId: string
+      clientTime: string
+    }
     expect(retryBatch.batchId).toBe(firstBatch.batchId)
+    expect(retryBatch.clientTime).toBe(firstBatch.clientTime)
 
     // 上一批已被服务端确认，后续批次属于新尝试
     const next = localFeeding('99999999-9999-4999-8999-999999999998')
@@ -355,6 +362,45 @@ describe('sync store', () => {
     const nextBatch = syncMocks.pushSyncBatch.mock.calls[2][0] as { batchId: string }
     expect(nextBatch.batchId).not.toBe(firstBatch.batchId)
     expect(await listOutbox()).toHaveLength(0)
+  })
+
+  it('同一批次重试复用 clientTime：首次 5xx、重试成功且不标记失败', async () => {
+    const record = localFeeding('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    await seedFeedingOutbox(record)
+    const sync = useSyncStore()
+
+    syncMocks.pushSyncBatch.mockRejectedValueOnce(
+      new ApiError('INTERNAL_ERROR', 500, '服务端错误'),
+    )
+    const failed = await sync.syncNow()
+    expect(failed.status).toBe('error')
+    const deferred = await getOutboxItem(outboxKey('FEEDING_RECORD', record.id))
+    expect(deferred?.failed).toBeFalsy()
+
+    // 退避窗口内再次编辑保存同一内容，使该条目重新到期
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: record.revision,
+      data: toFeedingSyncData(record),
+    })
+    mockApplied()
+    const outcome = await sync.syncNow()
+
+    expect(outcome.status).toBe('ok')
+    const firstPayload = syncMocks.pushSyncBatch.mock.calls[0][0] as {
+      batchId: string
+      clientTime: string
+    }
+    const retryPayload = syncMocks.pushSyncBatch.mock.calls[1][0] as {
+      batchId: string
+      clientTime: string
+    }
+    expect(retryPayload.batchId).toBe(firstPayload.batchId)
+    expect(retryPayload.clientTime).toBe(firstPayload.clientTime)
+    expect(await getOutboxItem(outboxKey('FEEDING_RECORD', record.id))).toBeUndefined()
+    expect(sync.failedCount).toBe(0)
   })
 
   it('失败后内容被修改则视为新尝试，换用新 batchId', async () => {
