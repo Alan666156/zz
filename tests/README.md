@@ -5,7 +5,7 @@
 - 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（TE-01b 修订，169 条）
 - 技术契约：[`../docs/architecture/v1.0-baby-feeding.md`](../docs/architecture/v1.0-baby-feeding.md)
 - 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-18，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
-- 当前状态：**TE-01b 骨架**。所有用例以 `test.skip` 注册，`npx playwright test --list` 可列出；真实断言在 TE-02（API）与 TE-03（E2E）实现。
+- 当前状态：**TE-02**。`api/**` 的 131 条已从 skip 骨架改为可执行断言；`e2e/**` 的 21 条仍为 TE-03 待实现的 skip 骨架。可执行性只表示断言已按契约写好，**不代表已对后端跑通**（见 §6 环境前提）。
 
 ---
 
@@ -25,6 +25,11 @@ tests/
 │   │   ├── env.ts            # API/Web 地址、zz_e2e、Redis DB14、限流阈值
 │   │   ├── export-token.ts   # addendum §4 canonical 自签导出 token
 │   │   ├── redis-keys.ts     # 同步锁/幂等 key（addendum §5）
+│   │   ├── redis.ts          # redis-cli 封装：FLUSHDB 14、SET NX PX、Lua 比较删除
+│   │   ├── db.ts             # mysql 封装：只允许 zz_e2e，仅用于造数/核对
+│   │   ├── device-hash.ts    # HMAC-SHA256(APP_DEVICE_PEPPER, deviceId) → hex
+│   │   ├── csv.ts            # BOM/CRLF 处理、RFC4180 解析、无设备头下载
+│   │   ├── scenario.ts       # 设备/宝宝/喂养夹具、§4.2 统计九条样本、404 一致性
 │   │   └── fixtures.ts       # 宝宝/喂养/生长/同步夹具
 │   ├── common.spec.ts        # GEN-01..11
 │   ├── devices.spec.ts       # DEV-01..06
@@ -128,9 +133,12 @@ set +a
 |---|---|---|
 | `API_BASE_URL` | `http://127.0.0.1:8080` | API 根地址（不含 `/api/v1`） |
 | `WEB_BASE_URL` | `http://127.0.0.1:4173` | E2E baseURL |
-| `DB_NAME` | `zz_e2e` | 重置脚本强制校验 |
-| `REDIS_DATABASE` | `14` | 重置脚本强制校验 |
+| `DB_NAME` | `zz_e2e` | 重置脚本与 `helpers/db.ts` 强制校验 |
+| `DB_HOST` / `DB_PORT` / `DB_USER` | `127.0.0.1` / `3306` / `root` | `helpers/db.ts` 直连参数 |
+| `REDIS_DATABASE` | `14` | 重置脚本与 `helpers/redis.ts` 强制校验 |
+| `REDIS_HOST` / `REDIS_PORT` | `127.0.0.1` / `6379` | `helpers/redis.ts` 直连参数 |
 | `DB_PASSWORD` / `REDIS_PASSWORD` | 无 | 必填，仅本机 |
+| `APP_DEVICE_PEPPER` | 无 | 必填：计算 `device_uid_hash` 以核对 DB 与同步锁 key（必须与后端一致） |
 | `RUN_RATE_LIMIT` | `0` | 设为 `1` 才执行限流专项 |
 | `APP_EXPORT_TOKEN_KEY` | 无 | TE-02 过期 token 用例使用（测试专用，禁止生产值） |
 | `APP_REDIS_KEY_PREFIX` | `zz:bf:v1:` | 同步锁/幂等 key 前缀，测试与后端必须一致 |
@@ -161,17 +169,19 @@ npm run reset:env
 ## 6. 运行
 
 ```bash
-# API 契约测试（TE-02 实现后有效）
+# API 契约测试（TE-02 已实现，需可用的后端/MySQL/Redis 与 §4 凭据）
 npm run test:api
 
-# E2E（TE-03 实现后有效；需前端 preview）
+# E2E（TE-03 待实现；需前端 preview）
 npm run test:e2e
 
 # 全部
 npm test
 ```
 
-当前（TE-01b）所有 Playwright 用例 skipped，运行结果是 `152 skipped`；另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行，属于预期。
+`npx playwright test --list` 列出 **152 条**：131 条 API（TE-02 可执行断言）+ 21 条 E2E（TE-03 skip 骨架）。另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
+
+**执行前提**：后端已实现对应接口，且 `DB_PASSWORD`、`REDIS_PASSWORD`、`APP_DEVICE_PEPPER`、`APP_EXPORT_TOKEN_KEY` 与本机 MySQL/Redis 可达。缺少任一条件时 API 套件会在 `beforeEach` 的 Redis/DB 辅助函数处报错，属于环境未就绪，不是断言失败。仅实现 BE-01..BE-03 的后端只能覆盖 GEN/DEV/BABY/HEALTH，其余模块会因 404/校验差异失败。
 
 ### 限流专项
 
@@ -194,7 +204,7 @@ RUN_RATE_LIMIT=1 npm run test:rate-limit
 
 - MySQL：`zz_e2e`；Redis：DB 14。每轮/每场景前重置。
 - E2E：每个场景新建 context，首次打开生成新设备 UUID；断言通过从首个 `/api/v1/` 请求捕获的 `X-Device-Id` 做后端核对。
-- API：每个 spec/describe 使用独立设备 UUID；TE-02 可增加设备池（见用例文档 §24.1）。
+- API：每个用例新建独立设备 UUID，并在 `beforeEach` 执行 `FLUSHDB 14` 后重新 init（见用例文档 §24.1）；不跨用例复用设备或数据。
 
 ### 7.2 init 限流约束（Q-12 已裁决）
 
