@@ -18,7 +18,7 @@ import { useFeedingStore } from '@/stores/feeding'
 import { useGrowthStore } from '@/stores/growth'
 import { useSyncStore } from '@/stores/sync'
 import type { Baby, FeedingRecordInput, GrowthRecord } from '@/types/models'
-import { toOffsetISOString } from '@/utils/date'
+import { toOffsetISOString, todayLocalDate } from '@/utils/date'
 import { buildLocalFeedingRecord, toFeedingSyncData } from '@/utils/feeding'
 
 const syncMocks = vi.hoisted(() => ({
@@ -169,6 +169,7 @@ describe('sync store', () => {
     syncMocks.pushSyncBatch.mockReset()
     babyApiMocks.fetchBabies.mockReset()
     babyApiMocks.fetchBabies.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
+    babyApiMocks.deleteBabyRequest.mockReset()
   })
 
   it('按 BABY 优先、每批 ≤50 推送，APPLIED 后清空 outbox', async () => {
@@ -576,16 +577,117 @@ describe('sync store', () => {
     babyStore.babies = [baby]
     const feeding = useFeedingStore()
     feeding.currentBabyId = baby.id
+    feeding.currentDate = todayLocalDate()
 
     await feeding.createLocal(formulaInput(), baby.id)
+    const recordId = feeding.records[0].id
     expect(await listOutbox()).toHaveLength(1)
 
+    // 离线删除：记录缓存与 outbox 保留，挂起等待 BABY DELETE 确认（N-1）
+    babyApiMocks.deleteBabyRequest.mockRejectedValue(
+      new ApiError('NETWORK_ERROR', 0, 'offline'),
+    )
     await babyStore.removeBaby(baby.id)
-    expect(await listOutbox()).toHaveLength(0)
+    expect(await listOutbox()).toHaveLength(2)
+    expect(await getFeedingRecordCache(recordId)).toBeDefined()
+
+    syncMocks.pushSyncBatch.mockImplementation(
+      async (payload: { batchId: string; changes: Change[] }) => ({
+        batchId: payload.batchId,
+        replayed: false,
+        processedAt: new Date().toISOString(),
+        results: payload.changes.map((change) => ({
+          entityType: change.entityType,
+          id: change.id,
+          status: 'APPLIED',
+          revision: 2,
+          record: null,
+        })),
+        summary: {
+          applied: payload.changes.length,
+          duplicate: 0,
+          conflict: 0,
+          rejected: 0,
+        },
+      }),
+    )
 
     const outcome = await useSyncStore().syncNow()
-    expect(syncMocks.pushSyncBatch).not.toHaveBeenCalled()
+    // 挂起期间只推送 BABY DELETE，记录不会先被推成 REJECTED
+    expect(syncMocks.pushSyncBatch).toHaveBeenCalledTimes(1)
+    const pushed = syncMocks.pushSyncBatch.mock.calls[0][0] as { changes: Change[] }
+    expect(pushed.changes).toHaveLength(1)
+    expect(pushed.changes[0]).toMatchObject({ entityType: 'BABY', op: 'DELETE' })
+    // 删除确认后才清理缓存与 outbox
+    expect(await getFeedingRecordCache(recordId)).toBeUndefined()
+    expect(await listOutbox()).toHaveLength(0)
     expect(outcome.rejected).toBe(0)
     expect(useSyncStore().failedCount).toBe(0)
+  })
+
+  it('同步删除宝宝遇 CONFLICT_SERVER_WINS：宝宝恢复且记录不丢（N-1）', async () => {
+    const baby: Baby = {
+      id: 'baby-1',
+      name: '小满',
+      gender: 'FEMALE',
+      birthDate: '2026-03-01',
+      isDefault: true,
+      revision: 1,
+      createdAt: '2026-10-26T00:00:00.000Z',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+      deletedAt: null,
+    }
+    const babyStore = useBabyStore()
+    babyStore.babies = [baby]
+    const feeding = useFeedingStore()
+    feeding.currentBabyId = baby.id
+    feeding.currentDate = todayLocalDate()
+    await feeding.createLocal(formulaInput(), baby.id)
+    const recordId = feeding.records[0].id
+
+    babyApiMocks.deleteBabyRequest.mockRejectedValue(
+      new ApiError('NETWORK_ERROR', 0, 'offline'),
+    )
+    await babyStore.removeBaby(baby.id)
+    expect(await listOutbox()).toHaveLength(2)
+
+    const serverBaby = { ...baby, name: '服务端小满', revision: 2 }
+    syncMocks.pushSyncBatch.mockImplementation(
+      async (payload: { batchId: string; changes: Change[] }) => ({
+        batchId: payload.batchId,
+        replayed: false,
+        processedAt: new Date().toISOString(),
+        results: payload.changes.map((change) =>
+          change.entityType === 'BABY'
+            ? {
+                entityType: change.entityType,
+                id: change.id,
+                status: 'CONFLICT_SERVER_WINS',
+                revision: serverBaby.revision,
+                record: serverBaby,
+              }
+            : {
+                entityType: change.entityType,
+                id: change.id,
+                status: 'APPLIED',
+                revision: 1,
+                record: appliedRecord(change),
+              },
+        ),
+        summary: {
+          applied: payload.changes.length - 1,
+          duplicate: 0,
+          conflict: 1,
+          rejected: 0,
+        },
+      }),
+    )
+
+    await useSyncStore().syncNow()
+
+    expect(babyStore.babies).toHaveLength(1)
+    expect(babyStore.babies[0]).toMatchObject({ id: baby.id, name: '服务端小满', revision: 2 })
+    expect(feeding.records.some((entry) => entry.id === recordId)).toBe(true)
+    expect(await getFeedingRecordCache(recordId)).toBeDefined()
   })
 })

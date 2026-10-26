@@ -136,7 +136,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 - 设备注册（UI-01）：任意请求返回 409 `DEVICE_NOT_REGISTERED` 时，`api/client.ts` 通过 device store 的 `onDeviceNotRegistered()` 初始化后重试一次，而不是直接调 `initDevice()`；store 内并发 `init()` 共享同一个进行中请求，`registered` 置位后 router 的 `ensureInitialized()` 不再发请求。
 - 列表合并（FE-04）：宝宝 / 喂养 / 生长的服务端列表按 outbox 未完成项（`pendingOutboxOps()`）合并——pending `UPSERT` 的 id 用本地值覆盖服务端旧值，pending `DELETE` 的 id 从服务端列表剔除且不得复活；其余记录以服务端为准。离线编辑过的已同步记录、离线删除但服务端仍存在的记录都不会被一次刷新抹掉。
 - 默认宝宝 revision（FE-06）：服务端切换默认宝宝时会同时递增**旧默认宝宝**的 revision，删除默认宝宝时会提升另一个宝宝并递增其 revision。本地只更新被 PATCH/DELETE 的那一条会导致之后编辑旧默认宝宝 409，且 409 分支不会自动自愈；因此在线设置默认、在线删除默认宝宝、以及同步结果把某个宝宝应用为默认后，都会重新拉取宝宝列表对齐所有 revision（sync 路径为异步刷新，不阻塞推送）。
-- 删除宝宝（FE-07）：本地删除宝宝时一并清理该 babyId 的 FEEDING_RECORD / GROWTH_RECORD outbox 项（outbox 项新增仅本地的 `babyId` 字段，不进入 `/sync/push` 请求体）；若 `sync.batchPlan` 引用了被删条目则一并删除。否则记录缓存已删而 outbox 仍在，联网后服务端会把它们判 `REJECTED`，用户既看不到也无法处理。同步收到宝宝 tombstone 时同样清理。
+- 删除宝宝（FE-07 / N-1）：记录缓存与记录级 outbox 只在删除不可逆确认后清理（在线 2xx/404、同步 `APPLIED`/`DUPLICATE`/tombstone）。在线 409 或其他 4xx 回滚时宝宝恢复、记录缓存与 outbox 原样保留；离线删除时先入队 BABY DELETE，其名下 FEEDING_RECORD / GROWTH_RECORD 项**挂起**（不参与 `planBatch` 推送，避免服务端判 `REJECTED`），删除确认后统一清理，同步 `CONFLICT_SERVER_WINS` 恢复宝宝后自动解除挂起。outbox 项带仅本地的 `babyId` 字段，不进入 `/sync/push` 请求体；`sync.batchPlan` 引用被清理条目时一并删除。
 - 本地存储失败（FE-08）：`enqueueOutbox` 失败视为保存失败——回滚 Pinia 与缓存并抛错，弹窗展示错误且不提示「已记录」；缓存写入失败允许降级为仅内存，但 feeding / growth / baby store 会置 `cacheDegraded` 并写入 `lastError`，不再空 catch（宝宝在线操作成功后缓存失败也不会误回滚服务端结果）。
 
 ### 底部导航（FE-10）
@@ -323,7 +323,7 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 86.9 KB |
+| 首屏 JS | ≤ 200 KB gzip | 87.0 KB |
 | 首屏 CSS | ≤ 50 KB gzip | 33.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 

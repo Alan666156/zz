@@ -118,6 +118,22 @@ function batchFingerprint(changes: SyncChange[]): string {
   return hashString(JSON.stringify(changes))
 }
 
+/** 存在未完成的 BABY DELETE：该宝宝名下记录先挂起，绝不能推成 REJECTED（N-1） */
+function pendingBabyDeletionIds(items: OutboxItem[]): Set<string> {
+  return new Set(
+    items
+      .filter((item) => item.entityType === 'BABY' && item.op === 'DELETE' && !item.failed)
+      .map((item) => item.entityId),
+  )
+}
+
+function isSuspendedByBabyDeletion(item: OutboxItem, pending: Set<string>): boolean {
+  if (item.entityType === 'BABY') return false
+  const babyId =
+    item.babyId ?? (typeof item.data?.babyId === 'string' ? item.data.babyId : undefined)
+  return babyId !== undefined && pending.has(babyId)
+}
+
 /**
  * 选择本批要推送的记录：
  * - 若上次请求因网络/5xx 失败且待推送内容完全未变，复用原 batchId（服务端返回缓存，避免重复处理）；
@@ -126,6 +142,7 @@ function batchFingerprint(changes: SyncChange[]): string {
 async function planBatch(
   available: OutboxItem[],
   nowIso: string,
+  isSuspended: (item: OutboxItem) => boolean = () => false,
 ): Promise<{ batchId: string; clientTime: string; items: OutboxItem[] } | null> {
   const plan = await getMeta<SyncBatchPlan>(SYNC_BATCH_PLAN_META_KEY)
   if (plan) {
@@ -135,7 +152,7 @@ async function planBatch(
     const byKey = new Map(allItems.map((item) => [item.key, item]))
     const items = plan.keys
       .map((key) => byKey.get(key))
-      .filter((item): item is OutboxItem => Boolean(item))
+      .filter((item): item is OutboxItem => item !== undefined && !isSuspended(item))
     const intact =
       items.length === plan.keys.length &&
       items.length > 0 &&
@@ -384,12 +401,16 @@ export const useSyncStore = defineStore('sync', {
       const attempted = new Set<string>()
 
       for (let round = 0; round < MAX_BATCH_ROUNDS; round += 1) {
+        // 待删宝宝名下的记录挂起（不删 outbox），避免服务端判 REJECTED；删除确认或冲突后再恢复
+        const pendingBabyDeletes = pendingBabyDeletionIds(await listOutbox())
+        const isSuspended = (item: OutboxItem) =>
+          isSuspendedByBabyDeletion(item, pendingBabyDeletes)
         const available = (await listSyncableOutbox()).filter(
-          (item) => !attempted.has(item.key),
+          (item) => !attempted.has(item.key) && !isSuspended(item),
         )
         if (available.length === 0) break
 
-        const planned = await planBatch(available, new Date().toISOString())
+        const planned = await planBatch(available, new Date().toISOString(), isSuspended)
         if (!planned) break
         const { batchId, clientTime, items: batch } = planned
         for (const item of batch) attempted.add(item.key)
