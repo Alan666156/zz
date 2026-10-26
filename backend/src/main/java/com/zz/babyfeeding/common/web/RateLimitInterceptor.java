@@ -29,6 +29,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private static final Duration EXPORT_WINDOW = Duration.ofHours(1);
     private static final Duration SYNC_WINDOW = Duration.ofMinutes(1);
 
+    private static final String EXPORT_PATH = "/api/v1/exports/feeding-records";
+    private static final String EXPORT_RESERVATION_ATTRIBUTE =
+            RateLimitInterceptor.class.getName() + ".exportReservation";
+
     private final RateLimiter rateLimiter;
     private final DeviceIdHasher deviceIdHasher;
     private final int apiLimit;
@@ -62,48 +66,90 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
         RateLimiter.RateLimitResult apiResult =
                 rateLimiter.acquire("api", deviceSubject, apiLimit, API_WINDOW);
-        applyHeaders(response, apiResult);
+        applyHeaders(response, apiResult.limit(), apiResult.remaining());
         enforce(apiResult, "api", API_WINDOW);
 
         if (HttpMethod.POST.matches(request.getMethod())) {
             if ("/api/v1/devices/init".equals(path)) {
                 RateLimiter.RateLimitResult initResult =
                         rateLimiter.acquire("init", ipSubject, initLimit, INIT_WINDOW);
-                applyHeaders(response, initResult);
+                applyHeaders(response, initResult.limit(), initResult.remaining());
                 enforce(initResult, "init", INIT_WINDOW);
-            } else if ("/api/v1/exports/feeding-records".equals(path)) {
-                RateLimiter.RateLimitResult exportResult =
-                        rateLimiter.acquire("export", deviceSubject, exportLimit, EXPORT_WINDOW);
-                applyHeaders(response, exportResult);
-                enforce(exportResult, "export", EXPORT_WINDOW);
+            } else if (EXPORT_PATH.equals(path)) {
+                reserveExport(request, response, deviceSubject);
             } else if ("/api/v1/sync/push".equals(path)) {
                 RateLimiter.RateLimitResult syncResult =
                         rateLimiter.acquire("sync", deviceSubject, syncLimit, SYNC_WINDOW);
-                applyHeaders(response, syncResult);
+                applyHeaders(response, syncResult.limit(), syncResult.remaining());
                 enforce(syncResult, "sync", SYNC_WINDOW);
             }
         }
         return true;
     }
 
-    private static void enforce(RateLimiter.RateLimitResult result, String scope, Duration window) {
-        if (!result.allowed()) {
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("scope", scope);
-            data.put("limit", result.limit());
-            data.put("windowSeconds", window.toSeconds());
-            throw new BusinessException(ErrorCode.RATE_LIMITED, "请求过于频繁，请稍后重试", data)
-                    .withRetryAfterSeconds(result.retryAfterSeconds());
+    /**
+     * Q-20: the export quota counts successful issuances only. The slot is
+     * reserved before validation so concurrent requests cannot overshoot; a
+     * non-2xx outcome releases it again in {@link #afterCompletion}.
+     */
+    private void reserveExport(HttpServletRequest request, HttpServletResponse response,
+                               String deviceSubject) {
+        RateLimiter.Reservation reservation =
+                rateLimiter.reserve("export", deviceSubject, exportLimit, EXPORT_WINDOW);
+        applyHeaders(response, reservation.limit(), reservation.remaining());
+        if (!reservation.allowed()) {
+            throw rateLimited(reservation.limit(), reservation.retryAfterSeconds(),
+                    "export", EXPORT_WINDOW);
+        }
+        if (reservation.key() != null) {
+            request.setAttribute(EXPORT_RESERVATION_ATTRIBUTE,
+                    new ExportReservation(reservation.key(), exportLimit));
         }
     }
 
-    private static void applyHeaders(HttpServletResponse response, RateLimiter.RateLimitResult result) {
-        // remaining < 0 means Redis failed open: do not fabricate limit headers (Q-18).
-        if (result.remaining() < 0) {
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                Object handler, Exception ex) {
+        Object value = request.getAttribute(EXPORT_RESERVATION_ATTRIBUTE);
+        if (!(value instanceof ExportReservation reservation)) {
             return;
         }
-        response.setHeader("X-RateLimit-Limit", String.valueOf(result.limit()));
-        response.setHeader("X-RateLimit-Remaining", String.valueOf(result.remaining()));
+        request.removeAttribute(EXPORT_RESERVATION_ATTRIBUTE);
+        int status = response.getStatus();
+        if (ex == null && status >= 200 && status < 300) {
+            return;
+        }
+        long remaining = rateLimiter.release(reservation.key(), reservation.limit());
+        if (remaining >= 0) {
+            // Failure: the quota is back to its pre-request value (Q-20).
+            response.setHeader("X-RateLimit-Limit", String.valueOf(reservation.limit()));
+            response.setHeader("X-RateLimit-Remaining", String.valueOf(remaining));
+        }
+    }
+
+    private static void enforce(RateLimiter.RateLimitResult result, String scope, Duration window) {
+        if (!result.allowed()) {
+            throw rateLimited(result.limit(), result.retryAfterSeconds(), scope, window);
+        }
+    }
+
+    private static BusinessException rateLimited(long limit, long retryAfterSeconds,
+                                                 String scope, Duration window) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("scope", scope);
+        data.put("limit", limit);
+        data.put("windowSeconds", window.toSeconds());
+        return new BusinessException(ErrorCode.RATE_LIMITED, "请求过于频繁，请稍后重试", data)
+                .withRetryAfterSeconds(retryAfterSeconds);
+    }
+
+    private static void applyHeaders(HttpServletResponse response, long limit, long remaining) {
+        // remaining < 0 means Redis failed open: do not fabricate limit headers (Q-18).
+        if (remaining < 0) {
+            return;
+        }
+        response.setHeader("X-RateLimit-Limit", String.valueOf(limit));
+        response.setHeader("X-RateLimit-Remaining", String.valueOf(remaining));
     }
 
     private String deviceSubject(HttpServletRequest request) {
@@ -124,5 +170,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         }
         return HttpMethod.GET.matches(method)
                 && path.startsWith("/api/v1/exports/feeding-records/");
+    }
+
+    private record ExportReservation(String key, int limit) {
     }
 }
