@@ -4,7 +4,7 @@
 
 - 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（TE-01b 修订，169 条）
 - 技术契约：[`../docs/architecture/v1.0-baby-feeding.md`](../docs/architecture/v1.0-baby-feeding.md)
-- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-18，冲突时以此为准；导出 token 短字段名以 f7a7f6e 为准）
+- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-18，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
 - 当前状态：**TE-01b 骨架**。所有用例以 `test.skip` 注册，`npx playwright test --list` 可列出；真实断言在 TE-02（API）与 TE-03（E2E）实现。
 
 ---
@@ -24,6 +24,7 @@ tests/
 │   │   ├── api-client.ts     # 统一响应包、错误断言、设备客户端
 │   │   ├── env.ts            # API/Web 地址、zz_e2e、Redis DB14、限流阈值
 │   │   ├── export-token.ts   # addendum §4 canonical 自签导出 token
+│   │   ├── redis-keys.ts     # 同步锁/幂等 key（addendum §5）
 │   │   └── fixtures.ts       # 宝宝/喂养/生长/同步夹具
 │   ├── common.spec.ts        # GEN-01..11
 │   ├── devices.spec.ts       # DEV-01..06
@@ -132,6 +133,7 @@ set +a
 | `DB_PASSWORD` / `REDIS_PASSWORD` | 无 | 必填，仅本机 |
 | `RUN_RATE_LIMIT` | `0` | 设为 `1` 才执行限流专项 |
 | `APP_EXPORT_TOKEN_KEY` | 无 | TE-02 过期 token 用例使用（测试专用，禁止生产值） |
+| `APP_REDIS_KEY_PREFIX` | `zz:bf:v1:` | 同步锁/幂等 key 前缀，测试与后端必须一致 |
 | `APP_RATE_LIMIT_API_PER_MINUTE` | `120` | 后端与测试上下文必须一致（Q-12） |
 | `APP_RATE_LIMIT_INIT_PER_HOUR` | `10` | 同上 |
 | `APP_RATE_LIMIT_EXPORT_PER_HOUR` | `5` | 同上 |
@@ -210,7 +212,7 @@ RUN_RATE_LIMIT=1 npm run test:rate-limit
 - 3 秒/1 秒计时受机器负载影响，取 3 次中位数并记录环境；超时按缺陷处理，不放宽断言。
 - CSV 格式、精度、标签顺序、tombstone 语义已由 addendum 裁决并体现在用例文档 §23；仍待落地的是前端 `data-testid` 清单（Q-14）与 FE-07 文案（Q-15）。
 - 导出过期 token 用例依赖测试专用 `APP_EXPORT_TOKEN_KEY` 与 `api/helpers/export-token.ts` 的 canonical 自签（短字段 `v,d,b,f,t,e,n`，base64url 无 padding）；禁止使用生产密钥。
-- 同步锁用例（SYNC-16）通过预占 Redis `lock:sync:{deviceId}` 确定性触发，不再依赖并发碰运气。
+- 同步锁用例（SYNC-16）通过预占 Redis `{APP_REDIS_KEY_PREFIX}lock:sync:{deviceHashHex}`（默认 `zz:bf:v1:lock:sync:{deviceHashHex}`，SET NX PX 15s）确定性触发；幂等 key 为 `{prefix}sync:{deviceHashHex}:{batchId}`（24h），不再依赖并发碰运气。
 - 规模用例（10,001 行导出）通过仅限 `zz_e2e` 的直接 SQL 造数，运行后必须重置。
 - 真机兼容（iOS 14 / Android 10 / 微信 / 支付宝）与 WebView 下载兜底只能人工执行，见用例文档 §19/§20。
 

@@ -39,3 +39,6 @@ export const RUN_RATE_LIMIT = process.env.RUN_RATE_LIMIT === '1';
 
 /** 导出 token TTL 固定 300 秒，生产不可配（Q-16）。 */
 export const EXPORT_TOKEN_TTL_SECONDS = 300;
+
+/** Redis key 前缀；测试与后端必须一致（addendum §5）。 */
+export const REDIS_KEY_PREFIX = process.env.APP_REDIS_KEY_PREFIX ?? 'zz:bf:v1:';

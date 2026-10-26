@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
+import { EXPORT_TOKEN_TTL_SECONDS } from './env';
 
 /**
  * 导出 token canonical 格式（addendum §4，字段名以已实现的 ExportTokenService 为准）：
@@ -57,7 +58,8 @@ export function signExportToken(
     n: payload.n,
   };
   const payloadPart = base64Url(JSON.stringify(canonical));
-  const signature = base64Url(createHmac('sha256', key).update(payloadPart).digest());
+  // 签名对 payloadPart 的 ASCII 字节计算；base64url 输出不带 padding。
+  const signature = base64Url(createHmac('sha256', key).update(Buffer.from(payloadPart, 'ascii')).digest());
   return `${payloadPart}.${signature}`;
 }
 
@@ -75,7 +77,7 @@ export function newExportTokenPayload(args: TokenArgs, nowSeconds = Math.floor(D
     b: args.babyId,
     f: args.from,
     t: args.to,
-    e: nowSeconds + 300,
+    e: nowSeconds + EXPORT_TOKEN_TTL_SECONDS,
     n: randomUUID(),
   };
 }
