@@ -5,6 +5,8 @@ import com.zz.babyfeeding.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RateLimitIntegrationTest extends IntegrationTestBase {
@@ -51,5 +53,47 @@ class RateLimitIntegrationTest extends IntegrationTestBase {
         assertThat(blocked.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("120");
         assertThat(blocked.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("0");
         assertThat(body(blocked).path("data").path("scope").asText()).isEqualTo("api");
+    }
+
+    /** N-7: ";matrix" content must not hide the endpoint from its own limit. */
+    @Test
+    void deviceInitWithMatrixParametersUsesTheInitLimit() throws Exception {
+        String matrixPath = "/api/v1/devices/init;a=1";
+        for (int i = 0; i < 10; i++) {
+            MvcResult result = postJson(matrixPath, newDeviceId(),
+                    Map.of("platform", "H5", "appVersion", "1.0.0"));
+            assertThat(result.getResponse().getStatus()).isEqualTo(200);
+            assertThat(result.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("10");
+        }
+
+        MvcResult blocked = postJson(matrixPath, newDeviceId(),
+                Map.of("platform", "H5", "appVersion", "1.0.0"));
+        assertError(blocked, 429, "RATE_LIMITED");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("10");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("0");
+        assertThat(body(blocked).path("data").path("scope").asText()).isEqualTo("init");
+    }
+
+    /** N-7: sync stays at 30/min per device even with matrix parameters. */
+    @Test
+    void syncWithMatrixParametersUsesTheSyncLimit() throws Exception {
+        String deviceId = newDeviceId();
+        initDeviceOk(deviceId);
+        String matrixPath = "/api/v1/sync/push;x=y";
+
+        for (int i = 0; i < 30; i++) {
+            MvcResult result = postJson(matrixPath, deviceId, Map.of());
+            assertThat(result.getResponse().getHeader("X-RateLimit-Limit"))
+                    .as("request %s must be counted by the sync limiter", i + 1)
+                    .isEqualTo("30");
+            assertThat(result.getResponse().getStatus()).isEqualTo(400);
+        }
+
+        MvcResult blocked = postJson(matrixPath, deviceId, Map.of());
+        assertError(blocked, 429, "RATE_LIMITED");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("30");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("0");
+        assertThat(blocked.getResponse().getHeader("Retry-After")).isNotNull();
+        assertThat(body(blocked).path("data").path("scope").asText()).isEqualTo("sync");
     }
 }

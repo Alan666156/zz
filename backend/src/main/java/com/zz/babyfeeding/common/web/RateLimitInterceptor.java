@@ -61,7 +61,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
             return true;
         }
-        String path = request.getRequestURI();
+        // Matrix parameters are ignored by handler mapping; compare the
+        // normalized path so ";..." cannot skip the per-endpoint limits (N-7).
+        String path = RequestPaths.withinApplication(request);
         if (isExempt(path, request.getMethod())) {
             return true;
         }
