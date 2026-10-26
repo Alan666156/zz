@@ -227,6 +227,11 @@ export async function getMeta<T>(key: string): Promise<T | undefined> {
   return entry?.value as T | undefined
 }
 
+export async function deleteMeta(key: string): Promise<void> {
+  const db = await getDb()
+  await db.delete('meta', key)
+}
+
 /** 测试/调试用：清空所有本地数据（不删库，避免连接阻塞） */
 export async function clearAllData(): Promise<void> {
   const db = await getDb()

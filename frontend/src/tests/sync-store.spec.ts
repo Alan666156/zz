@@ -322,6 +322,66 @@ describe('sync store', () => {
     expect(Date.parse(item?.nextRetryAt ?? '')).toBeGreaterThan(Date.now())
   })
 
+  it('同一批网络重试复用 batchId；服务端确认后新批次生成新 batchId', async () => {
+    const record = localFeeding('88888888-8888-4888-8888-888888888888')
+    await seedFeedingOutbox(record)
+    const sync = useSyncStore()
+
+    syncMocks.pushSyncBatch.mockRejectedValueOnce(
+      new ApiError('NETWORK_ERROR', 0, '网络不可用'),
+    )
+    await sync.syncNow()
+
+    // 退避未到期时再次保存同一内容：请求体不变，仍复用原批次
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: record.revision,
+      data: toFeedingSyncData(record),
+    })
+    mockApplied()
+    const outcome = await sync.syncNow()
+
+    expect(outcome.status).toBe('ok')
+    const firstBatch = syncMocks.pushSyncBatch.mock.calls[0][0] as { batchId: string }
+    const retryBatch = syncMocks.pushSyncBatch.mock.calls[1][0] as { batchId: string }
+    expect(retryBatch.batchId).toBe(firstBatch.batchId)
+
+    // 上一批已被服务端确认，后续批次属于新尝试
+    const next = localFeeding('99999999-9999-4999-8999-999999999998')
+    await seedFeedingOutbox(next)
+    await sync.syncNow()
+    const nextBatch = syncMocks.pushSyncBatch.mock.calls[2][0] as { batchId: string }
+    expect(nextBatch.batchId).not.toBe(firstBatch.batchId)
+    expect(await listOutbox()).toHaveLength(0)
+  })
+
+  it('失败后内容被修改则视为新尝试，换用新 batchId', async () => {
+    const record = localFeeding('99999999-9999-4999-8999-999999999999')
+    await seedFeedingOutbox(record)
+    const sync = useSyncStore()
+
+    syncMocks.pushSyncBatch.mockRejectedValueOnce(
+      new ApiError('NETWORK_ERROR', 0, '网络不可用'),
+    )
+    await sync.syncNow()
+
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: record.revision,
+      data: { ...toFeedingSyncData(record), amountValue: 150 },
+    })
+    mockApplied()
+    await sync.syncNow()
+
+    const firstBatch = syncMocks.pushSyncBatch.mock.calls[0][0] as { batchId: string }
+    const changedBatch = syncMocks.pushSyncBatch.mock.calls[1][0] as { batchId: string }
+    expect(changedBatch.batchId).not.toBe(firstBatch.batchId)
+  })
+
   it('DELETE 已同步记录 APPLIED 后移除本地', async () => {
     const record = localFeeding('66666666-6666-4666-8666-666666666666')
     await putFeedingRecordCache(record)

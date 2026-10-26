@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { ApiError, isRetryableApiError } from '@/api/client'
 import { pushSyncBatch, type SyncChange, type SyncPushResult } from '@/api/sync'
-import { getFeedingRecordCache, getGrowthRecordCache } from '@/db'
+import {
+  deleteMeta,
+  getFeedingRecordCache,
+  getGrowthRecordCache,
+  getMeta,
+  setMeta,
+} from '@/db'
 import {
   deferOutbox,
   listOutbox,
@@ -43,6 +49,17 @@ const BATCH_SIZE = 50
 const MAX_BATCH_ROUNDS = 10
 /** 1s, 2s, 5s, 15s, 60s, 5min（±20% jitter，契约 §5.4） */
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 15000, 60000, 300000]
+/**
+ * 批次幂等（契约 §4.10 / §5.4）：每次新尝试生成新 batchId，
+ * 同一批的网络重试必须复用原 batchId 才能命中服务端 24h 缓存。
+ */
+const SYNC_BATCH_PLAN_META_KEY = 'sync.batchPlan'
+
+interface SyncBatchPlan {
+  batchId: string
+  keys: string[]
+  fingerprint: string
+}
 
 export type SyncRunStatus = 'ok' | 'offline' | 'busy' | 'error'
 
@@ -82,6 +99,57 @@ function toChange(item: OutboxItem): SyncChange {
   }
   if (item.data) change.data = item.data
   return change
+}
+
+/** FNV-1a，仅用于比较批次请求体是否变化，不做安全用途 */
+function hashString(input: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+function batchFingerprint(changes: SyncChange[]): string {
+  return hashString(JSON.stringify(changes))
+}
+
+/**
+ * 选择本批要推送的记录：
+ * - 若上次请求因网络/5xx 失败且待推送内容完全未变，复用原 batchId（服务端返回缓存，避免重复处理）；
+ * - 内容有任何变化（编辑、删除、新增）则视为新尝试，生成新 batchId。
+ */
+async function planBatch(
+  available: OutboxItem[],
+  nowIso: string,
+): Promise<{ batchId: string; items: OutboxItem[] } | null> {
+  const plan = await getMeta<SyncBatchPlan>(SYNC_BATCH_PLAN_META_KEY)
+  if (plan) {
+    const byKey = new Map(available.map((item) => [item.key, item]))
+    const items = plan.keys
+      .map((key) => byKey.get(key))
+      .filter((item): item is OutboxItem => Boolean(item))
+    const intact =
+      items.length === plan.keys.length &&
+      items.length > 0 &&
+      items.length <= BATCH_SIZE &&
+      batchFingerprint(items.map(toChange)) === plan.fingerprint
+    if (intact) return { batchId: plan.batchId, items }
+    await deleteMeta(SYNC_BATCH_PLAN_META_KEY)
+  }
+
+  const items = available
+    .filter((item) => item.nextRetryAt <= nowIso)
+    .slice(0, BATCH_SIZE)
+  if (items.length === 0) return null
+  const batchId = uuidV4()
+  await setMeta(SYNC_BATCH_PLAN_META_KEY, {
+    batchId,
+    keys: items.map((item) => item.key),
+    fingerprint: batchFingerprint(items.map(toChange)),
+  })
+  return { batchId, items }
 }
 
 interface NavigatorLocks {
@@ -308,13 +376,15 @@ export const useSyncStore = defineStore('sync', {
         )
         if (available.length === 0) break
 
-        const batch = available.slice(0, BATCH_SIZE)
+        const planned = await planBatch(available, new Date().toISOString())
+        if (!planned) break
+        const { batchId, items: batch } = planned
         for (const item of batch) attempted.add(item.key)
 
         let response
         try {
           response = await pushSyncBatch({
-            batchId: uuidV4(),
+            batchId,
             clientTime: toOffsetISOString(),
             changes: batch.map(toChange),
           })
@@ -333,6 +403,8 @@ export const useSyncStore = defineStore('sync', {
           }
         }
 
+        // 服务端已返回结果，本批结束；下一批视为新的尝试
+        await deleteMeta(SYNC_BATCH_PLAN_META_KEY)
         this.lastError = null
         const byKey = new Map<string, SyncPushResult>()
         for (const result of response.results) {
@@ -403,8 +475,10 @@ export const useSyncStore = defineStore('sync', {
         )
         return
       }
-      // 4xx 业务错误：不自动重试，保留本地并等待用户修改
+      // 4xx 业务错误：不自动重试，保留本地并等待用户修改；
+      // 该批不会再自动重试，丢弃批次计划，用户修改后重新入队生成新 batchId
       await Promise.all(batch.map((item) => markOutboxFailed(item.key, message)))
+      await deleteMeta(SYNC_BATCH_PLAN_META_KEY)
     },
 
     async applyResult(
