@@ -90,7 +90,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | 离线（`navigator.onLine === false`） | `当前网络不可用，页面尚未加载，请恢复网络后重试` |
 | 其他/无法判断 | `页面加载失败，请检查网络后重试` |
 
-对话框 `data-testid="route-load-error"`，重试按钮 `route-load-retry`，取消按钮 `route-load-cancel`。失败后当前路由不变，禁止自动重试；重试只由用户点击触发，再次失败继续弹同一对话框。
+对话框 `data-testid="route-load-error"`，重试按钮 `route-load-retry`，取消按钮 `route-load-cancel`。失败后当前路由不变，禁止自动重试；重试只由用户点击触发，再次失败继续弹同一对话框。`router.push/replace` 的 reject 与 `router.onError` 会同时收到同一次失败，按「对话框已展示且目标相同」去重，只更新离线文案；重试使用 `router.replace` 回到原目标，重试期间「重试」「取消」均禁用，避免并发导航。
 
 ### 导出（FE-07 / Q-16）
 
@@ -169,6 +169,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 | testid | 元素 |
 | --- | --- |
+| `home-page` | 首页根节点 |
 | `baby-card` | 当前宝宝卡片（点击打开切换） |
 | `baby-switcher-item` | 宝宝切换列表项（可重复） |
 | `baby-switcher-add` | 切换面板中的“添加宝宝” |
@@ -248,6 +249,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 | testid | 元素 |
 | --- | --- |
+| `profile-page` | 我的页根节点 |
 | `baby-form` | 宝宝表单（onboarding 与新增/编辑共用） |
 | `baby-form-name` | 昵称原生 input |
 | `baby-form-gender-male` / `baby-form-gender-female` / `baby-form-gender-unknown` | 性别单选 |
@@ -321,7 +323,7 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 86.7 KB |
+| 首屏 JS | ≤ 200 KB gzip | 86.8 KB |
 | 首屏 CSS | ≤ 50 KB gzip | 33.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 

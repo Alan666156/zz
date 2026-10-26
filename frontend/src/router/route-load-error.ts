@@ -37,7 +37,14 @@ function isOffline(): boolean {
  */
 export function reportRouteLoadError(error: unknown, target: string | null): boolean {
   if (!isChunkLoadError(error)) return false
-  useUiStore().showRouteLoadError({ offline: isOffline(), target })
+  const ui = useUiStore()
+  // 同一次失败会同时触发 push/replace 的 reject 与 router.onError：
+  // 对话框已展示且目标相同时只刷新离线文案，不再重复“打开”，避免两层弹窗（FE-11）。
+  if (ui.routeLoadErrorVisible && ui.routeLoadErrorTarget === target) {
+    ui.routeLoadErrorOffline = isOffline()
+    return true
+  }
+  ui.showRouteLoadError({ offline: isOffline(), target })
   return true
 }
 
@@ -57,7 +64,7 @@ export async function navigateSafely(
   router: Router,
   to: RouteLocationRaw,
   options: { replace?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
   const target = resolveTarget(router, to)
   try {
     if (options.replace) {
@@ -65,8 +72,9 @@ export async function navigateSafely(
     } else {
       await router.push(to)
     }
+    return true
   } catch (error) {
-    if (reportRouteLoadError(error, target)) return
+    if (reportRouteLoadError(error, target)) return false
     throw error
   }
 }

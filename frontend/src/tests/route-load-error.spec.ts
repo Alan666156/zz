@@ -62,7 +62,7 @@ describe('路由 chunk 加载失败兜底（FIX-FE-11 / Q-24）', () => {
     expect(isChunkLoadError(new Error('普通错误'))).toBe(false)
   })
 
-  it('离线导航失败：模态框显示离线文案，路由保持首页；恢复网络重试成功', async () => {
+  it('离线导航失败：模态框显示离线文案，路由保持首页；离线重试再次弹出，恢复网络后重试成功', async () => {
     vi.stubGlobal('navigator', { onLine: false })
     const loadRecords = vi.fn().mockRejectedValue(CHUNK_ERROR)
     const router = makeRouter(() => loadRecords())
@@ -78,9 +78,20 @@ describe('路由 chunk 加载失败兜底（FIX-FE-11 / Q-24）', () => {
     expect(dialog.text()).toContain('当前网络不可用，页面尚未加载，请恢复网络后重试')
     expect(wrapper!.find('[data-testid="route-load-retry"]').exists()).toBe(true)
 
+    // 仍离线时点重试：对话框保持展示，路由仍是首页
+    await wrapper!.get('[data-testid="route-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(ui.routeLoadErrorVisible).toBe(true)
+    expect(router.currentRoute.value.name).toBe('home')
+    expect(wrapper!.get('[data-testid="route-load-error"]').text()).toContain(
+      '当前网络不可用，页面尚未加载，请恢复网络后重试',
+    )
+
     loadRecords.mockReset()
     loadRecords.mockResolvedValue({ default: { template: '<div>records</div>' } })
     vi.stubGlobal('navigator', { onLine: true })
+    const replaceSpy = vi.spyOn(router, 'replace')
 
     await wrapper!.get('[data-testid="route-load-retry"]').trigger('click')
     await flushPromises()
@@ -88,7 +99,22 @@ describe('路由 chunk 加载失败兜底（FIX-FE-11 / Q-24）', () => {
     await vi.waitFor(() => {
       expect(router.currentRoute.value.name).toBe('records')
     })
+    expect(replaceSpy).toHaveBeenCalledWith('/records')
     expect(ui.routeLoadErrorVisible).toBe(false)
+  })
+
+  it('push reject 与 router.onError 对同一次失败只处理一次（不重复弹窗）', async () => {
+    vi.stubGlobal('navigator', { onLine: true })
+    const router = makeRouter(() => Promise.reject(CHUNK_ERROR))
+    const { ui } = await mountDialog(router)
+    const showSpy = vi.spyOn(ui, 'showRouteLoadError')
+
+    await navigateSafely(router, { name: 'records' })
+    await flushPromises()
+    await flushPromises()
+
+    expect(showSpy).toHaveBeenCalledTimes(1)
+    expect(ui.routeLoadErrorVisible).toBe(true)
   })
 
   it('在线导航失败：显示通用文案；取消后留在当前页', async () => {
