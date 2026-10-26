@@ -17,6 +17,7 @@ import {
   enqueueOutbox,
   listOutbox,
   outboxKey,
+  pendingOutboxOps,
   removeOutbox,
 } from '@/db/outbox'
 import type {
@@ -194,12 +195,25 @@ export const useFeedingStore = defineStore('feeding', {
           size: safeSize,
         })
         if (seq !== this.loadSeq) return
-        const serverItems = result.items.filter((record) => !record.deletedAt)
+        // 以 outbox 未完成项为准：pending 编辑用本地值，pending DELETE 不得被服务端复活
+        const pendingOps = await pendingOutboxOps('FEEDING_RECORD').catch(
+          () => new Map<string, 'UPSERT' | 'DELETE'>(),
+        )
+        if (seq !== this.loadSeq) return
+        const localById = new Map(cached.map((record) => [record.id, record]))
+        const serverItems = result.items
+          .filter((record) => !record.deletedAt && pendingOps.get(record.id) !== 'DELETE')
+          .map((record) =>
+            pendingOps.has(record.id) ? localById.get(record.id) ?? record : record,
+          )
         const knownIds = new Set(
           [...(append ? this.records : []), ...serverItems].map((record) => record.id),
         )
         const pendingLocal = cached.filter(
-          (record) => record.revision === 0 && !knownIds.has(record.id),
+          (record) =>
+            !knownIds.has(record.id) &&
+            ((pendingOps.has(record.id) && pendingOps.get(record.id) !== 'DELETE') ||
+              record.revision === 0),
         )
         this.mergeRecords(
           append ? [...this.records, ...serverItems, ...pendingLocal] : [...serverItems, ...pendingLocal],

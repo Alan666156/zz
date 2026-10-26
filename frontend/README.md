@@ -110,7 +110,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 - 触发：应用启动、`online` / `offline` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入（含离线写入）与可重试错误后的 `requestSync()`。
 - 离线计数：`runSync()` 先执行 `refreshPending()`（只读 IndexedDB，不发请求）再判断在线状态，离线新增/编辑/删除后横幅「待同步 N 条」立即更新；离线不进入 `syncNow()`。
 - 批量：`POST /api/v1/sync/push`，每批 1–50 条，`BABY` 优先、同类型按 `createdAt` 升序。
-- 批次幂等：每次**新尝试**生成新 `batchId`；网络/5xx/429 失败后把 `{batchId, keys, fingerprint}` 存入 IndexedDB `meta` 的 `sync.batchPlan`，下一轮内容未变时复用同一 `batchId` 与同一批记录重试，命中服务端 24h 缓存（`replayed:true`）。内容被编辑/删除/新增，或已收到服务端结果，则丢弃计划并生成新 `batchId`。
+- 批次幂等：每次**新尝试**生成新 `batchId` 并同时固化 `clientTime`；失败后把 `{batchId, clientTime, keys, fingerprint}` 存入 IndexedDB `meta` 的 `sync.batchPlan`，下一轮内容未变时用**完全相同**的 `batchId` + `clientTime` + 记录列表重试，命中服务端 24h 缓存（`replayed:true`）。服务端对完整请求体哈希（含 `clientTime`），因此重试时不能重新取当前时间，否则哈希不同直接 409。内容被编辑/删除/新增，或已收到服务端结果，则丢弃计划并生成新 `batchId`。计划完整性按**完整 outbox** 判断（不是 `listSyncableOutbox()` 的到期子集）：批次里有条目仍在退避时本轮不发送、也不换 `batchId`，等全部到期后原样重放。
 - 退避：1s / 2s / 5s / 15s / 60s / 5min，±20% 抖动；429/409 优先遵守 `Retry-After`。
 - 结果处理：
   - `APPLIED` / `DUPLICATE` / `CONFLICT_SERVER_WINS`：按服务端返回记录覆盖本地缓存与 Pinia，再清 outbox。
@@ -123,6 +123,8 @@ E2E 与排障请只依赖 `zz.bf.*`。
 - 在线 `GET/PATCH/DELETE` 遇到 404 视为“记录已不存在”：从本机缓存与 Pinia 移除（编辑场景提示“记录已不存在，已从本机移除”）。
 - `PATCH` 请求体**不得**包含 `babyId`（Q-04），前端由 `toFeedingPatchData()` 统一剥离。
 - 设备注册（UI-01）：任意请求返回 409 `DEVICE_NOT_REGISTERED` 时，`api/client.ts` 通过 device store 的 `onDeviceNotRegistered()` 初始化后重试一次，而不是直接调 `initDevice()`；store 内并发 `init()` 共享同一个进行中请求，`registered` 置位后 router 的 `ensureInitialized()` 不再发请求。
+- 列表合并（FE-04）：宝宝 / 喂养 / 生长的服务端列表按 outbox 未完成项（`pendingOutboxOps()`）合并——pending `UPSERT` 的 id 用本地值覆盖服务端旧值，pending `DELETE` 的 id 从服务端列表剔除且不得复活；其余记录以服务端为准。离线编辑过的已同步记录、离线删除但服务端仍存在的记录都不会被一次刷新抹掉。
+- 默认宝宝 revision（FE-06）：服务端切换默认宝宝时会同时递增**旧默认宝宝**的 revision，删除默认宝宝时会提升另一个宝宝并递增其 revision。本地只更新被 PATCH/DELETE 的那一条会导致之后编辑旧默认宝宝 409，且 409 分支不会自动自愈；因此在线设置默认、在线删除默认宝宝、以及同步结果把某个宝宝应用为默认后，都会重新拉取宝宝列表对齐所有 revision（sync 路径为异步刷新，不阻塞推送）。
 
 ## `data-testid` 清单（Q-14）
 

@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
 import { useFeedingRecorder } from '@/composables/useFeedingRecorder'
-import { getFeedingRecordsByBabyDate } from '@/db'
-import { listOutbox } from '@/db/outbox'
+import { getFeedingRecordsByBabyDate, putFeedingRecordCache } from '@/db'
+import { enqueueOutbox, listOutbox } from '@/db/outbox'
 import { useFeedingStore } from '@/stores/feeding'
 import { toOffsetISOString, todayLocalDate } from '@/utils/date'
-import { buildLocalFeedingRecord } from '@/utils/feeding'
+import { buildLocalFeedingRecord, toFeedingSyncData } from '@/utils/feeding'
 import type { FeedingRecordInput } from '@/types/models'
 
 const apiMocks = vi.hoisted(() => ({
@@ -227,5 +227,64 @@ describe('feeding store + recorder', () => {
     expect(store.records.map((record) => record.id).sort()).toEqual(
       [pending.id, 'server-record'].sort(),
     )
+  })
+
+  it('pending 编辑不被服务端旧值覆盖', async () => {
+    const store = useFeedingStore()
+    const today = todayLocalDate()
+    store.currentBabyId = 'baby-1'
+    store.currentDate = today
+    const synced = { ...buildLocalFeedingRecord(formulaInput(), 'baby-1'), revision: 1 }
+    const edited = { ...synced, amountValue: 150 }
+    await putFeedingRecordCache(edited)
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: edited.id,
+      op: 'UPSERT',
+      baseRevision: 1,
+      data: toFeedingSyncData(edited),
+    })
+    store.mergeRecords([edited])
+
+    apiMocks.listFeedingRecords.mockResolvedValue({
+      items: [{ ...synced, amountValue: 100 }],
+      page: 1,
+      size: 100,
+      total: 1,
+      hasNext: false,
+    })
+
+    await store.loadDay('baby-1', today)
+
+    expect(store.records.find((item) => item.id === edited.id)?.amountValue).toBe(150)
+    const cached = await getFeedingRecordsByBabyDate('baby-1', today)
+    expect(cached.find((item) => item.id === edited.id)?.amountValue).toBe(150)
+  })
+
+  it('pending DELETE 不被服务端列表复活', async () => {
+    const store = useFeedingStore()
+    const today = todayLocalDate()
+    store.currentBabyId = 'baby-1'
+    store.currentDate = today
+    const synced = { ...buildLocalFeedingRecord(formulaInput(), 'baby-1'), revision: 1 }
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: synced.id,
+      op: 'DELETE',
+      baseRevision: 1,
+    })
+
+    apiMocks.listFeedingRecords.mockResolvedValue({
+      items: [synced],
+      page: 1,
+      size: 100,
+      total: 1,
+      hasNext: false,
+    })
+
+    await store.loadDay('baby-1', today)
+
+    expect(store.records.some((item) => item.id === synced.id)).toBe(false)
+    expect(await getFeedingRecordsByBabyDate('baby-1', today)).toHaveLength(0)
   })
 })

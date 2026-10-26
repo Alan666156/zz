@@ -114,6 +114,21 @@ export async function listOutbox(): Promise<OutboxItem[]> {
   })
 }
 
+/**
+ * 某实体在 outbox 中未完成项的 id -> op。
+ * 合并服务端列表时以它为准：pending UPSERT 用本地值，pending DELETE 不得复活。
+ */
+export async function pendingOutboxOps(
+  entityType: SyncEntityType,
+): Promise<Map<string, SyncOp>> {
+  const items = await listOutbox()
+  const ops = new Map<string, SyncOp>()
+  for (const item of items) {
+    if (item.entityType === entityType) ops.set(item.entityId, item.op)
+  }
+  return ops
+}
+
 export async function countOutbox(entityType?: SyncEntityType): Promise<number> {
   const db = await getDb()
   const items = await db.getAll('outbox')

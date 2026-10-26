@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
 import {
   getFeedingRecordCache,
+  getMeta,
   putFeedingRecordCache,
   putGrowthRecordCache,
 } from '@/db'
@@ -24,7 +25,16 @@ const syncMocks = vi.hoisted(() => ({
   pushSyncBatch: vi.fn(),
 }))
 
+const babyApiMocks = vi.hoisted(() => ({
+  fetchBabies: vi.fn(),
+  createBabyRequest: vi.fn(),
+  patchBabyRequest: vi.fn(),
+  deleteBabyRequest: vi.fn(),
+}))
+
 vi.mock('@/api/sync', () => syncMocks)
+// 同步应用默认宝宝后会异步刷新宝宝列表（FE-06），测试里保持离线避免真实请求
+vi.mock('@/api/babies', () => babyApiMocks)
 
 type Change = {
   entityType: 'BABY' | 'FEEDING_RECORD' | 'GROWTH_RECORD'
@@ -157,6 +167,8 @@ describe('sync store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     syncMocks.pushSyncBatch.mockReset()
+    babyApiMocks.fetchBabies.mockReset()
+    babyApiMocks.fetchBabies.mockRejectedValue(new ApiError('NETWORK_ERROR', 0, 'offline'))
   })
 
   it('按 BABY 优先、每批 ≤50 推送，APPLIED 后清空 outbox', async () => {
@@ -344,9 +356,16 @@ describe('sync store', () => {
     const outcome = await sync.syncNow()
 
     expect(outcome.status).toBe('ok')
-    const firstBatch = syncMocks.pushSyncBatch.mock.calls[0][0] as { batchId: string }
-    const retryBatch = syncMocks.pushSyncBatch.mock.calls[1][0] as { batchId: string }
+    const firstBatch = syncMocks.pushSyncBatch.mock.calls[0][0] as {
+      batchId: string
+      clientTime: string
+    }
+    const retryBatch = syncMocks.pushSyncBatch.mock.calls[1][0] as {
+      batchId: string
+      clientTime: string
+    }
     expect(retryBatch.batchId).toBe(firstBatch.batchId)
+    expect(retryBatch.clientTime).toBe(firstBatch.clientTime)
 
     // 上一批已被服务端确认，后续批次属于新尝试
     const next = localFeeding('99999999-9999-4999-8999-999999999998')
@@ -355,6 +374,92 @@ describe('sync store', () => {
     const nextBatch = syncMocks.pushSyncBatch.mock.calls[2][0] as { batchId: string }
     expect(nextBatch.batchId).not.toBe(firstBatch.batchId)
     expect(await listOutbox()).toHaveLength(0)
+  })
+
+  it('同一批次重试复用 clientTime：首次 5xx、重试成功且不标记失败', async () => {
+    const record = localFeeding('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    await seedFeedingOutbox(record)
+    const sync = useSyncStore()
+
+    syncMocks.pushSyncBatch.mockRejectedValueOnce(
+      new ApiError('INTERNAL_ERROR', 500, '服务端错误'),
+    )
+    const failed = await sync.syncNow()
+    expect(failed.status).toBe('error')
+    const deferred = await getOutboxItem(outboxKey('FEEDING_RECORD', record.id))
+    expect(deferred?.failed).toBeFalsy()
+
+    // 退避窗口内再次编辑保存同一内容，使该条目重新到期
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: record.revision,
+      data: toFeedingSyncData(record),
+    })
+    mockApplied()
+    const outcome = await sync.syncNow()
+
+    expect(outcome.status).toBe('ok')
+    const firstPayload = syncMocks.pushSyncBatch.mock.calls[0][0] as {
+      batchId: string
+      clientTime: string
+    }
+    const retryPayload = syncMocks.pushSyncBatch.mock.calls[1][0] as {
+      batchId: string
+      clientTime: string
+    }
+    expect(retryPayload.batchId).toBe(firstPayload.batchId)
+    expect(retryPayload.clientTime).toBe(firstPayload.clientTime)
+    expect(await getOutboxItem(outboxKey('FEEDING_RECORD', record.id))).toBeUndefined()
+    expect(sync.failedCount).toBe(0)
+  })
+
+  it('退避窗口内 syncNow 不丢计划，batchId/clientTime 保持不变', async () => {
+    const record = localFeeding('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+    await seedFeedingOutbox(record)
+    const sync = useSyncStore()
+
+    syncMocks.pushSyncBatch.mockRejectedValueOnce(
+      new ApiError('NETWORK_ERROR', 0, '网络不可用'),
+    )
+    await sync.syncNow()
+    const planBefore = await getMeta<{ batchId: string; clientTime: string }>(
+      'sync.batchPlan',
+    )
+    expect(planBefore?.batchId).toBeTruthy()
+    const callsAfterFailure = syncMocks.pushSyncBatch.mock.calls.length
+
+    // 退避未到期时新增另一条记录：旧计划不能被挤掉或换 batchId
+    const another = localFeeding('cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    await seedFeedingOutbox(another)
+    await sync.syncNow()
+    expect(syncMocks.pushSyncBatch).toHaveBeenCalledTimes(callsAfterFailure)
+    const planAfter = await getMeta<{ batchId: string; clientTime: string }>(
+      'sync.batchPlan',
+    )
+    expect(planAfter?.batchId).toBe(planBefore?.batchId)
+    expect(planAfter?.clientTime).toBe(planBefore?.clientTime)
+
+    // 旧条目重新到期后，用原批次原样重放（只含原批次记录）
+    await enqueueOutbox({
+      entityType: 'FEEDING_RECORD',
+      entityId: record.id,
+      op: 'UPSERT',
+      baseRevision: record.revision,
+      data: toFeedingSyncData(record),
+    })
+    mockApplied()
+    await sync.syncNow()
+
+    const replay = syncMocks.pushSyncBatch.mock.calls[callsAfterFailure][0] as {
+      batchId: string
+      clientTime: string
+      changes: Change[]
+    }
+    expect(replay.batchId).toBe(planBefore?.batchId)
+    expect(replay.clientTime).toBe(planBefore?.clientTime)
+    expect(replay.changes.map((change) => change.id)).toEqual([record.id])
   })
 
   it('失败后内容被修改则视为新尝试，换用新 batchId', async () => {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
 import { getGrowthRecordsByBaby, putGrowthRecordCache } from '@/db'
-import { listOutbox } from '@/db/outbox'
+import { enqueueOutbox, listOutbox } from '@/db/outbox'
 import { useGrowthStore } from '@/stores/growth'
 import type { GrowthRecord, GrowthRecordInput } from '@/types/models'
 
@@ -145,5 +145,62 @@ describe('growth store', () => {
     expect(await getGrowthRecordsByBaby('baby-1')).toHaveLength(0)
     expect(apiMocks.deleteGrowthRecordRequest).toHaveBeenCalledWith(local.id, 1)
     expect(await listOutbox()).toHaveLength(0)
+  })
+
+  it('pending 编辑不被服务端旧值覆盖', async () => {
+    const local = record({ id: 'growth-pending', weightKg: 9.5 })
+    const edited = { ...local, weightKg: 10.2 }
+    await putGrowthRecordCache(edited)
+    await enqueueOutbox({
+      entityType: 'GROWTH_RECORD',
+      entityId: edited.id,
+      op: 'UPSERT',
+      baseRevision: 1,
+      data: {
+        babyId: edited.babyId,
+        measuredOn: edited.measuredOn,
+        heightCm: edited.heightCm,
+        weightKg: edited.weightKg,
+        headCircumferenceCm: edited.headCircumferenceCm,
+        note: edited.note,
+      },
+    })
+    apiMocks.listGrowthRecords.mockResolvedValue({
+      items: [local],
+      page: 1,
+      size: 100,
+      total: 1,
+      hasNext: false,
+    })
+    const store = useGrowthStore()
+
+    await store.load('baby-1')
+
+    expect(store.records.find((item) => item.id === edited.id)?.weightKg).toBe(10.2)
+    const cached = await getGrowthRecordsByBaby('baby-1')
+    expect(cached.find((item) => item.id === edited.id)?.weightKg).toBe(10.2)
+  })
+
+  it('pending DELETE 不被服务端列表复活', async () => {
+    const local = record({ id: 'growth-deleted' })
+    await enqueueOutbox({
+      entityType: 'GROWTH_RECORD',
+      entityId: local.id,
+      op: 'DELETE',
+      baseRevision: 1,
+    })
+    apiMocks.listGrowthRecords.mockResolvedValue({
+      items: [local],
+      page: 1,
+      size: 100,
+      total: 1,
+      hasNext: false,
+    })
+    const store = useGrowthStore()
+
+    await store.load('baby-1')
+
+    expect(store.records.some((item) => item.id === local.id)).toBe(false)
+    expect(await getGrowthRecordsByBaby('baby-1')).toHaveLength(0)
   })
 })

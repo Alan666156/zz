@@ -58,6 +58,8 @@ const SYNC_BATCH_PLAN_META_KEY = 'sync.batchPlan'
 
 interface SyncBatchPlan {
   batchId: string
+  /** 随批次固化：服务端对含 clientTime 的完整请求体做哈希，重试必须逐字节一致 */
+  clientTime: string
   keys: string[]
   fingerprint: string
 }
@@ -124,10 +126,13 @@ function batchFingerprint(changes: SyncChange[]): string {
 async function planBatch(
   available: OutboxItem[],
   nowIso: string,
-): Promise<{ batchId: string; items: OutboxItem[] } | null> {
+): Promise<{ batchId: string; clientTime: string; items: OutboxItem[] } | null> {
   const plan = await getMeta<SyncBatchPlan>(SYNC_BATCH_PLAN_META_KEY)
   if (plan) {
-    const byKey = new Map(available.map((item) => [item.key, item]))
+    // 退避中的条目不在 listSyncableOutbox() 里，必须用完整 outbox 判断批次是否完整，
+    // 否则退避窗口内会误判「内容变化」而丢掉 batchId。
+    const allItems = await listOutbox().catch(() => available)
+    const byKey = new Map(allItems.map((item) => [item.key, item]))
     const items = plan.keys
       .map((key) => byKey.get(key))
       .filter((item): item is OutboxItem => Boolean(item))
@@ -136,7 +141,12 @@ async function planBatch(
       items.length > 0 &&
       items.length <= BATCH_SIZE &&
       batchFingerprint(items.map(toChange)) === plan.fingerprint
-    if (intact) return { batchId: plan.batchId, items }
+    if (intact) {
+      // 批次里仍有条目在退避窗口：本轮不发，保留 batchId/clientTime，等全部到期后原样重放
+      const allDue = items.every((item) => item.nextRetryAt <= nowIso)
+      if (!allDue) return null
+      return { batchId: plan.batchId, clientTime: plan.clientTime, items }
+    }
     await deleteMeta(SYNC_BATCH_PLAN_META_KEY)
   }
 
@@ -145,12 +155,14 @@ async function planBatch(
     .slice(0, BATCH_SIZE)
   if (items.length === 0) return null
   const batchId = uuidV4()
+  const clientTime = toOffsetISOString()
   await setMeta(SYNC_BATCH_PLAN_META_KEY, {
     batchId,
+    clientTime,
     keys: items.map((item) => item.key),
     fingerprint: batchFingerprint(items.map(toChange)),
   })
-  return { batchId, items }
+  return { batchId, clientTime, items }
 }
 
 interface NavigatorLocks {
@@ -380,14 +392,15 @@ export const useSyncStore = defineStore('sync', {
 
         const planned = await planBatch(available, new Date().toISOString())
         if (!planned) break
-        const { batchId, items: batch } = planned
+        const { batchId, clientTime, items: batch } = planned
         for (const item of batch) attempted.add(item.key)
 
         let response
         try {
           response = await pushSyncBatch({
             batchId,
-            clientTime: toOffsetISOString(),
+            // 同一批次的所有重试必须复用同一 clientTime，否则服务端哈希不同直接 409
+            clientTime,
             changes: batch.map(toChange),
           })
         } catch (error) {
