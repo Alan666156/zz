@@ -65,9 +65,14 @@ class ExportTokenServiceTest {
     void rejectsTamperedSignature() {
         ExportTokenService service = service("export-key-1234567890", NOW);
         String token = service.issue(DEVICE_HASH, BABY_ID, FROM, TO).token();
-        char last = token.charAt(token.length() - 1);
-        String tampered = token.substring(0, token.length() - 1)
-                + (last == 'A' ? 'B' : 'A');
+        int separator = token.lastIndexOf('.');
+        String payloadPart = token.substring(0, separator);
+        String signaturePart = token.substring(separator + 1);
+        // Flip the first signature character: every bit of a 43-char base64url
+        // encoding's first character is significant, unlike the last one, whose
+        // low bits are decoder-ignored padding.
+        char tamperedChar = signaturePart.charAt(0) == 'A' ? 'B' : 'A';
+        String tampered = payloadPart + "." + tamperedChar + signaturePart.substring(1);
 
         assertError(() -> service.verify(tampered), ErrorCode.EXPORT_TOKEN_INVALID);
     }
