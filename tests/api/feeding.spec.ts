@@ -474,8 +474,8 @@ test.describe('喂养记录（FEED）', () => {
     );
     expect(deduped.data.record.tags).toEqual(['SPIT_UP']);
 
-    // 枚举只有 5 个合法值（SPIT_UP/REFUSED/SLEEPY/HICCUP/OTHER），
-    // 因此“6 个不同合法标签”不存在；用 5 个唯一值验证上限不误伤。
+    // V1.0 标签枚举固定 5 个（SPIT_UP/REFUSED/SLEEPY/HICCUP/OTHER）：
+    // 5 个唯一合法值必须 200；“第 6 个不同值”只能是未知 code（下一步断言 400）。
     const maxTags = await expectOk<{ record: FeedingRecord }>(
       await client.post(
         '/feeding-records',

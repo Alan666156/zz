@@ -250,8 +250,12 @@ test.describe('设备隔离与安全（ISO/SEC）', () => {
 
     for (const path of paths) {
       const response = await request.get(path);
-      expect([403, 404]).toContain(response.status());
+      // Tomcat 默认拒绝编码斜杠/%00，平台层 400 属预期（团队裁决 Q-SEC-02）；
+      // 带合法格式 token 的畸形输入则为 403/404。关键是不泄露、不 5xx。
+      expect([400, 403, 404], path).toContain(response.status());
+      expect(response.status()).toBeLessThan(500);
       const text = await response.text();
+      expect(text).not.toContain('/etc/passwd');
       expect(text).not.toContain('root:');
       expect(text).not.toContain('No such file');
       expect(text).not.toContain('Exception');
