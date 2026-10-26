@@ -1,0 +1,394 @@
+import { defineStore } from 'pinia'
+import { ApiError, isRetryableApiError } from '@/api/client'
+import {
+  createGrowthRecordRequest,
+  deleteGrowthRecordRequest,
+  listGrowthRecords,
+  patchGrowthRecordRequest,
+} from '@/api/growth'
+import {
+  deleteGrowthRecordCache,
+  getGrowthRecordsByBaby,
+  putGrowthRecordCache,
+} from '@/db'
+import { enqueueOutbox, listOutbox, outboxKey, removeOutbox } from '@/db/outbox'
+import type { GrowthRecord, GrowthRecordInput } from '@/types/models'
+import {
+  latestGrowthRecord,
+  sortGrowthRecordsDesc,
+  toGrowthSyncData,
+  validateGrowthInput,
+} from '@/utils/growth'
+import { uuidV4 } from '@/utils/uuid'
+
+export type GrowthMutationStatus = 'synced' | 'pending' | 'conflict' | 'failed'
+
+export interface GrowthMutationOutcome {
+  status: GrowthMutationStatus
+  record?: GrowthRecord
+  message?: string
+}
+
+function byId(records: GrowthRecord[]): GrowthRecord[] {
+  const map = new Map<string, GrowthRecord>()
+  for (const record of records) {
+    map.set(record.id, record)
+  }
+  return [...map.values()]
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+/** 409 CONFLICT 的 data.current 是服务端最新记录 */
+function conflictCurrent(error: unknown): GrowthRecord | null {
+  if (!(error instanceof ApiError) || error.code !== 'CONFLICT') return null
+  const data = error.data as { current?: GrowthRecord | null } | null | undefined
+  return data?.current ?? null
+}
+
+function buildLocalGrowthRecord(
+  input: GrowthRecordInput,
+  babyId: string,
+  now: Date = new Date(),
+): GrowthRecord {
+  const timestamp = now.toISOString()
+  return {
+    id: input.id ?? uuidV4(),
+    babyId,
+    measuredOn: input.measuredOn,
+    heightCm: input.heightCm ?? null,
+    weightKg: input.weightKg ?? null,
+    headCircumferenceCm: input.headCircumferenceCm ?? null,
+    note: input.note?.trim() ? input.note.trim() : null,
+    revision: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    deletedAt: null,
+  }
+}
+
+function buildUpdatedGrowthRecord(
+  record: GrowthRecord,
+  input: GrowthRecordInput,
+  now: Date = new Date(),
+): GrowthRecord {
+  return {
+    ...record,
+    measuredOn: input.measuredOn,
+    heightCm: input.heightCm ?? null,
+    weightKg: input.weightKg ?? null,
+    headCircumferenceCm: input.headCircumferenceCm ?? null,
+    note: input.note?.trim() ? input.note.trim() : null,
+    updatedAt: now.toISOString(),
+  }
+}
+
+function patchPayload(record: GrowthRecord): Record<string, unknown> {
+  return {
+    baseRevision: record.revision,
+    measuredOn: record.measuredOn,
+    heightCm: record.heightCm,
+    weightKg: record.weightKg,
+    headCircumferenceCm: record.headCircumferenceCm,
+    note: record.note,
+  }
+}
+
+export const useGrowthStore = defineStore('growth', {
+  state: () => ({
+    records: [] as GrowthRecord[],
+    currentBabyId: null as string | null,
+    loading: false,
+    offline: false,
+    pendingCount: 0,
+    pendingIds: [] as string[],
+    loadSeq: 0,
+    lastError: null as string | null,
+  }),
+
+  getters: {
+    sortedRecords(state): GrowthRecord[] {
+      return sortGrowthRecordsDesc(state.records)
+    },
+    latest(state): GrowthRecord | null {
+      return latestGrowthRecord(state.records)
+    },
+    hasData(state): boolean {
+      return state.records.some((record) => !record.deletedAt)
+    },
+  },
+
+  actions: {
+    mergeRecords(list: GrowthRecord[]): void {
+      this.records = sortGrowthRecordsDesc(byId(list))
+    },
+
+    async refreshPendingCount(): Promise<void> {
+      try {
+        const items = await listOutbox()
+        const growthItems = items.filter((item) => item.entityType === 'GROWTH_RECORD')
+        this.pendingCount = growthItems.length
+        this.pendingIds = growthItems.map((item) => item.entityId)
+      } catch {
+        this.pendingCount = 0
+        this.pendingIds = []
+      }
+    },
+
+    /**
+     * 缓存优先：先展示 IndexedDB，再拉服务端最新 100 条。
+     * 服务端失败时保留缓存，并标记当前为离线数据。
+     */
+    async load(babyId: string): Promise<void> {
+      if (!babyId) return
+      const seq = this.loadSeq + 1
+      this.loadSeq = seq
+      this.currentBabyId = babyId
+      this.loading = true
+      this.offline = false
+
+      const pendingSnapshot = this.records.filter(
+        (record) => record.babyId === babyId && record.revision === 0,
+      )
+      let cached: GrowthRecord[] = []
+      try {
+        cached = (await getGrowthRecordsByBaby(babyId)).filter((record) => !record.deletedAt)
+      } catch {
+        cached = []
+      }
+      if (seq !== this.loadSeq) return
+      this.mergeRecords([...cached, ...pendingSnapshot])
+      await this.refreshPendingCount()
+      if (seq !== this.loadSeq) return
+
+      try {
+        const result = await listGrowthRecords({ babyId, page: 1, size: 100 })
+        if (seq !== this.loadSeq) return
+        const serverItems = result.items.filter((record) => !record.deletedAt)
+        const serverIds = new Set(serverItems.map((record) => record.id))
+        const pendingLocal = [...cached, ...pendingSnapshot].filter(
+          (record) => record.revision === 0 && !serverIds.has(record.id),
+        )
+        const merged = [...serverItems, ...pendingLocal]
+        this.mergeRecords(merged)
+        this.offline = false
+        this.lastError = null
+        for (const record of merged) {
+          try {
+            await putGrowthRecordCache(record)
+          } catch {
+            // 缓存写入失败不影响当前展示
+          }
+        }
+      } catch (error) {
+        if (seq !== this.loadSeq) return
+        this.mergeRecords([...cached, ...pendingSnapshot])
+        this.offline = cached.length > 0
+        this.lastError = errorMessage(error, '生长记录加载失败，当前显示本地缓存')
+      } finally {
+        if (seq === this.loadSeq) {
+          this.loading = false
+          await this.refreshPendingCount()
+        }
+      }
+    },
+
+    async createRecord(
+      input: GrowthRecordInput,
+      babyId: string,
+      birthDate: string,
+    ): Promise<GrowthMutationOutcome> {
+      const validationError = validateGrowthInput(input, birthDate)
+      if (validationError) throw new Error(validationError)
+
+      const record = buildLocalGrowthRecord(input, babyId)
+      try {
+        await putGrowthRecordCache(record)
+      } catch {
+        // IndexedDB 不可用时至少保证 Pinia 可用
+      }
+      try {
+        await enqueueOutbox({
+          entityType: 'GROWTH_RECORD',
+          entityId: record.id,
+          op: 'UPSERT',
+          baseRevision: 0,
+          data: toGrowthSyncData(record),
+        })
+      } catch {
+        // 队列失败时仍展示本地记录
+      }
+      if (record.babyId === this.currentBabyId) {
+        this.mergeRecords([record, ...this.records])
+      }
+      await this.refreshPendingCount()
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return { status: 'pending', record, message: '离线，记录待同步' }
+      }
+      return this.syncRecord(record)
+    },
+
+    /**
+     * 编辑：本地立即生效并折叠 outbox。
+     * 409 冲突按契约使用 data.current 覆盖本地。
+     */
+    async updateRecord(
+      record: GrowthRecord,
+      input: GrowthRecordInput,
+      birthDate: string,
+    ): Promise<GrowthMutationOutcome> {
+      const validationError = validateGrowthInput(input, birthDate)
+      if (validationError) throw new Error(validationError)
+
+      const updated = buildUpdatedGrowthRecord(record, input)
+      try {
+        await putGrowthRecordCache(updated)
+      } catch {
+        // 缓存失败不影响 Pinia 展示
+      }
+      try {
+        await enqueueOutbox({
+          entityType: 'GROWTH_RECORD',
+          entityId: updated.id,
+          op: 'UPSERT',
+          baseRevision: record.revision,
+          data: toGrowthSyncData(updated),
+        })
+      } catch {
+        // 队列失败时至少保留本地修改
+      }
+      this.mergeRecords([...this.records, updated])
+      await this.refreshPendingCount()
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return { status: 'pending', record: updated, message: '离线，修改待同步' }
+      }
+      if (record.revision === 0) {
+        return this.syncRecord(updated)
+      }
+
+      try {
+        const server = await patchGrowthRecordRequest(record.id, patchPayload(updated))
+        await this.applyServerRecord(server)
+        this.lastError = null
+        return { status: 'synced', record: server }
+      } catch (error) {
+        const current = conflictCurrent(error)
+        if (current) {
+          await this.applyServerRecord(current)
+          return {
+            status: 'conflict',
+            record: current,
+            message: '该记录已在其他端更新',
+          }
+        }
+        if (isRetryableApiError(error)) {
+          this.lastError = errorMessage(error, '网络不可用，修改待同步')
+          return { status: 'pending', record: updated, message: this.lastError }
+        }
+        await removeOutbox(outboxKey('GROWTH_RECORD', record.id))
+        await this.refreshPendingCount()
+        this.lastError = errorMessage(error, '保存失败')
+        return { status: 'failed', record: updated, message: this.lastError }
+      }
+    },
+
+    /** 删除：本地立即隐藏；已同步记录带 baseRevision 通知服务端 */
+    async deleteRecord(record: GrowthRecord): Promise<GrowthMutationOutcome> {
+      try {
+        await deleteGrowthRecordCache(record.id)
+      } catch {
+        // 缓存删除失败时仍从 Pinia 移除
+      }
+      this.records = this.records.filter((item) => item.id !== record.id)
+      try {
+        await enqueueOutbox({
+          entityType: 'GROWTH_RECORD',
+          entityId: record.id,
+          op: 'DELETE',
+          baseRevision: record.revision,
+        })
+      } catch {
+        // 队列失败时本地仍视为已删除
+      }
+      await this.refreshPendingCount()
+
+      if (record.revision === 0) {
+        return { status: 'synced' }
+      }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return { status: 'pending', message: '离线，删除待同步' }
+      }
+
+      try {
+        await deleteGrowthRecordRequest(record.id, record.revision)
+        await removeOutbox(outboxKey('GROWTH_RECORD', record.id))
+        await this.refreshPendingCount()
+        this.lastError = null
+        return { status: 'synced' }
+      } catch (error) {
+        const current = conflictCurrent(error)
+        if (current) {
+          await this.applyServerRecord(current)
+          return { status: 'conflict', record: current, message: '该记录已在其他端更新' }
+        }
+        if (isRetryableApiError(error)) {
+          this.lastError = errorMessage(error, '网络不可用，删除待同步')
+          return { status: 'pending', message: this.lastError }
+        }
+        await removeOutbox(outboxKey('GROWTH_RECORD', record.id))
+        await this.refreshPendingCount()
+        this.lastError = errorMessage(error, '删除失败')
+        return { status: 'failed', message: this.lastError }
+      }
+    },
+
+    async applyServerRecord(record: GrowthRecord): Promise<void> {
+      try {
+        await putGrowthRecordCache(record)
+      } catch {
+        // 忽略缓存写入失败
+      }
+      if (record.babyId === this.currentBabyId) {
+        this.mergeRecords([...this.records, record])
+      }
+      try {
+        await removeOutbox(outboxKey('GROWTH_RECORD', record.id))
+      } catch {
+        // 忽略
+      }
+      await this.refreshPendingCount()
+    },
+
+    /** 单条即时同步（新建/本地待同步编辑） */
+    async syncRecord(record: GrowthRecord): Promise<GrowthMutationOutcome> {
+      try {
+        const result = await createGrowthRecordRequest({
+          id: record.id,
+          babyId: record.babyId,
+          measuredOn: record.measuredOn,
+          heightCm: record.heightCm,
+          weightKg: record.weightKg,
+          headCircumferenceCm: record.headCircumferenceCm,
+          note: record.note,
+        })
+        await this.applyServerRecord(result.record)
+        this.lastError = null
+        return { status: 'synced', record: result.record }
+      } catch (error) {
+        if (!isRetryableApiError(error)) {
+          await removeOutbox(outboxKey('GROWTH_RECORD', record.id))
+          this.lastError = errorMessage(error, '记录同步失败')
+          await this.refreshPendingCount()
+          return { status: 'failed', record, message: this.lastError }
+        }
+        this.lastError = errorMessage(error, '网络不可用，记录待同步')
+        await this.refreshPendingCount()
+        return { status: 'pending', record, message: this.lastError }
+      }
+    },
+  },
+})

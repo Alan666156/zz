@@ -82,6 +82,13 @@ export interface GrowthRecordInput {
 
 export type GrowthMetric = 'height' | 'weight' | 'head'
 
+export interface GrowthTrendPoint {
+  date: string
+  heightCm: number | null
+  weightKg: number | null
+  headCircumferenceCm: number | null
+}
+
 export interface DailySummary {
   feedingCount: number
   byType: Record<FeedingType, number>

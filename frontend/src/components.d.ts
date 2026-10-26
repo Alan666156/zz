@@ -19,6 +19,8 @@ declare module 'vue' {
     FeedingTimeline: typeof import('./components/record/FeedingTimeline.vue')['default']
     FeedingTypeSheet: typeof import('./components/record/FeedingTypeSheet.vue')['default']
     FormulaSheet: typeof import('./components/record/FormulaSheet.vue')['default']
+    GrowthChart: typeof import('./components/chart/GrowthChart.vue')['default']
+    GrowthForm: typeof import('./components/growth/GrowthForm.vue')['default']
     MixedSheet: typeof import('./components/record/MixedSheet.vue')['default']
     OfflineBanner: typeof import('./components/common/OfflineBanner.vue')['default']
     QuickRecordFab: typeof import('./components/record/QuickRecordFab.vue')['default']
