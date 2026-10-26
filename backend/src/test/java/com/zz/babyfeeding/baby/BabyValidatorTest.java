@@ -53,25 +53,32 @@ class BabyValidatorTest {
     }
 
     @Test
-    void validatesBirthDateWindow() {
+    void validatesBirthDateWindowWithOneDayTolerance() {
         BabyValidator.validateBirthDate(TODAY, TODAY);
-        BabyValidator.validateBirthDate(TODAY.minusYears(3), TODAY);
+        BabyValidator.validateBirthDate(TODAY.plusDays(1), TODAY);
+        BabyValidator.validateBirthDate(TODAY.minusYears(3).minusDays(1), TODAY);
 
-        assertFieldError(() -> BabyValidator.validateBirthDate(TODAY.plusDays(1), TODAY),
+        assertFieldError(() -> BabyValidator.validateBirthDate(TODAY.plusDays(2), TODAY),
                 "birthDate");
         assertFieldError(() ->
-                BabyValidator.validateBirthDate(TODAY.minusYears(3).minusDays(1), TODAY),
+                BabyValidator.validateBirthDate(TODAY.minusYears(3).minusDays(2), TODAY),
                 "birthDate");
         assertFieldError(() -> BabyValidator.validateBirthDate(null, TODAY), "birthDate");
     }
 
     @Test
-    void normalisesIdsAndRequiresBaseRevision() {
+    void validatesIdsStrictlyAndRequiresBaseRevision() {
         String generated = BabyValidator.normalizeId(null);
         assertThat(generated).matches("[0-9a-f-]{36}");
-        assertThat(BabyValidator.normalizeId("F47AC10B-58CC-4372-A567-0E02B2C3D479"))
+        assertThat(BabyValidator.normalizeId("f47ac10b-58cc-4372-a567-0e02b2c3d479"))
                 .isEqualTo("f47ac10b-58cc-4372-a567-0e02b2c3d479");
         assertFieldError(() -> BabyValidator.normalizeId("not-a-uuid"), "id");
+        assertFieldError(() -> BabyValidator.normalizeId(""), "id");
+        // No auto-lowercasing (Q-13).
+        assertFieldError(() ->
+                BabyValidator.normalizeId("F47AC10B-58CC-4372-A567-0E02B2C3D479"), "id");
+        assertFieldError(() ->
+                BabyValidator.requireUuidV4("babyId", "NOT-A-UUID"), "babyId");
 
         BabyValidator.requireBaseRevision(1);
         assertFieldError(() -> BabyValidator.requireBaseRevision(null), "baseRevision");

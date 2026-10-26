@@ -41,10 +41,10 @@ public class DeviceController {
         if (header == null || header.isBlank()) {
             throw new BusinessException(ErrorCode.DEVICE_ID_REQUIRED);
         }
-        String trimmed = header.trim();
-        if (!UuidUtils.isUuidV4(trimmed)) {
+        // Canonical lower-case UUID v4 only; never normalise client input (Q-13).
+        if (!UuidUtils.isUuidV4(header)) {
             throw new BusinessException(ErrorCode.DEVICE_ID_INVALID);
         }
-        return UuidUtils.normalize(trimmed);
+        return header;
     }
 }

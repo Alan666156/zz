@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -71,11 +72,16 @@ class DeviceIntegrationTest extends IntegrationTestBase {
 
         assertError(getJson("/api/v1/babies", null), 400, "DEVICE_ID_REQUIRED");
         assertError(getJson("/api/v1/babies", "not-a-uuid"), 400, "DEVICE_ID_INVALID");
+        // Uppercase UUIDs are invalid, never normalised (Q-13).
+        assertError(getJson("/api/v1/babies", deviceId.toUpperCase(Locale.ROOT)),
+                400, "DEVICE_ID_INVALID");
         assertError(getJson("/api/v1/babies", newDeviceId()), 409, "DEVICE_NOT_REGISTERED");
         assertError(postJson("/api/v1/devices/init", null, Map.of("platform", "H5")),
                 400, "DEVICE_ID_REQUIRED");
         assertError(postJson("/api/v1/devices/init", "12345", Map.of("platform", "H5")),
                 400, "DEVICE_ID_INVALID");
+        assertError(postJson("/api/v1/devices/init", deviceId.toUpperCase(Locale.ROOT),
+                Map.of("platform", "H5")), 400, "DEVICE_ID_INVALID");
     }
 
     @Test

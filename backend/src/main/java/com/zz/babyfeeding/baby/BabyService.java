@@ -12,7 +12,6 @@ import com.zz.babyfeeding.common.api.ErrorCode;
 import com.zz.babyfeeding.common.redis.RedisCacheService;
 import com.zz.babyfeeding.common.redis.RedisKeys;
 import com.zz.babyfeeding.common.util.TimeUtils;
-import com.zz.babyfeeding.common.util.UuidUtils;
 import com.zz.babyfeeding.common.web.DeviceContext;
 import com.zz.babyfeeding.device.DeviceMapper;
 import org.springframework.dao.DuplicateKeyException;
@@ -74,10 +73,14 @@ public class BabyService {
         // Serialise per device so the 5-baby limit and default flag cannot race.
         deviceMapper.lockById(device.deviceRowId());
 
-        // Idempotency by id: repeated POST returns the existing row (including tombstone).
+        // Idempotency by id: repeated POST on an active row returns it; a
+        // tombstone is 404 and is never returned or revived online (Q-05/Q-06).
         BabyEntity existing = babyMapper.selectAnyById(id);
         if (existing != null) {
             ensureOwned(device, existing);
+            if (existing.getDeletedAt() != null) {
+                throw BabyValidator.notFound();
+            }
             babyCache.put(device.hashHex(), existing);
             return new CreateBabyResponse(false, toResponse(existing));
         }
@@ -118,6 +121,9 @@ public class BabyService {
                 throw ex;
             }
             ensureOwned(device, raced);
+            if (raced.getDeletedAt() != null) {
+                throw BabyValidator.notFound();
+            }
             return new CreateBabyResponse(false, toResponse(raced));
         }
 
@@ -275,9 +281,7 @@ public class BabyService {
     }
 
     private static void requireUuid(String babyId) {
-        if (!UuidUtils.isUuidV4(babyId)) {
-            throw BabyValidator.notFound();
-        }
+        BabyValidator.requireUuidV4("babyId", babyId);
     }
 
     private static BusinessException conflict(BabyEntity current) {

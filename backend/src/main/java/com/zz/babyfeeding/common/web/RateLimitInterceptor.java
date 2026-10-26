@@ -5,6 +5,7 @@ import com.zz.babyfeeding.common.api.ErrorCode;
 import com.zz.babyfeeding.common.redis.RateLimiter;
 import com.zz.babyfeeding.common.security.DeviceIdHasher;
 import com.zz.babyfeeding.common.util.UuidUtils;
+import com.zz.babyfeeding.config.AppProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpMethod;
@@ -23,11 +24,6 @@ import java.util.Map;
 @Component
 public class RateLimitInterceptor implements HandlerInterceptor {
 
-    private static final int API_LIMIT = 120;
-    private static final int INIT_LIMIT = 10;
-    private static final int EXPORT_LIMIT = 5;
-    private static final int SYNC_LIMIT = 30;
-
     private static final Duration API_WINDOW = Duration.ofMinutes(1);
     private static final Duration INIT_WINDOW = Duration.ofHours(1);
     private static final Duration EXPORT_WINDOW = Duration.ofHours(1);
@@ -35,10 +31,19 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     private final RateLimiter rateLimiter;
     private final DeviceIdHasher deviceIdHasher;
+    private final int apiLimit;
+    private final int initLimit;
+    private final int exportLimit;
+    private final int syncLimit;
 
-    public RateLimitInterceptor(RateLimiter rateLimiter, DeviceIdHasher deviceIdHasher) {
+    public RateLimitInterceptor(RateLimiter rateLimiter, DeviceIdHasher deviceIdHasher,
+                                AppProperties appProperties) {
         this.rateLimiter = rateLimiter;
         this.deviceIdHasher = deviceIdHasher;
+        this.apiLimit = appProperties.getRateLimitApiPerMinute();
+        this.initLimit = appProperties.getRateLimitInitPerHour();
+        this.exportLimit = appProperties.getRateLimitExportPerHour();
+        this.syncLimit = appProperties.getRateLimitSyncPerMinute();
     }
 
     @Override
@@ -56,23 +61,25 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String ipSubject = "ip:" + request.getRemoteAddr();
 
         RateLimiter.RateLimitResult apiResult =
-                rateLimiter.acquire("api", deviceSubject, API_LIMIT, API_WINDOW);
+                rateLimiter.acquire("api", deviceSubject, apiLimit, API_WINDOW);
         applyHeaders(response, apiResult);
         enforce(apiResult, "api", API_WINDOW);
 
         if (HttpMethod.POST.matches(request.getMethod())) {
             if ("/api/v1/devices/init".equals(path)) {
                 RateLimiter.RateLimitResult initResult =
-                        rateLimiter.acquire("init", ipSubject, INIT_LIMIT, INIT_WINDOW);
+                        rateLimiter.acquire("init", ipSubject, initLimit, INIT_WINDOW);
+                applyHeaders(response, initResult);
                 enforce(initResult, "init", INIT_WINDOW);
             } else if ("/api/v1/exports/feeding-records".equals(path)) {
                 RateLimiter.RateLimitResult exportResult =
-                        rateLimiter.acquire("export", deviceSubject, EXPORT_LIMIT, EXPORT_WINDOW);
+                        rateLimiter.acquire("export", deviceSubject, exportLimit, EXPORT_WINDOW);
                 applyHeaders(response, exportResult);
                 enforce(exportResult, "export", EXPORT_WINDOW);
             } else if ("/api/v1/sync/push".equals(path)) {
                 RateLimiter.RateLimitResult syncResult =
-                        rateLimiter.acquire("sync", deviceSubject, SYNC_LIMIT, SYNC_WINDOW);
+                        rateLimiter.acquire("sync", deviceSubject, syncLimit, SYNC_WINDOW);
+                applyHeaders(response, syncResult);
                 enforce(syncResult, "sync", SYNC_WINDOW);
             }
         }
@@ -91,10 +98,12 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     }
 
     private static void applyHeaders(HttpServletResponse response, RateLimiter.RateLimitResult result) {
-        response.setHeader("X-RateLimit-Limit", String.valueOf(result.limit()));
-        if (result.remaining() >= 0) {
-            response.setHeader("X-RateLimit-Remaining", String.valueOf(result.remaining()));
+        // remaining < 0 means Redis failed open: do not fabricate limit headers (Q-18).
+        if (result.remaining() < 0) {
+            return;
         }
+        response.setHeader("X-RateLimit-Limit", String.valueOf(result.limit()));
+        response.setHeader("X-RateLimit-Remaining", String.valueOf(result.remaining()));
     }
 
     private String deviceSubject(HttpServletRequest request) {
@@ -103,8 +112,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return "dev:" + identity.hashHex();
         }
         String header = request.getHeader("X-Device-Id");
-        if (header != null && UuidUtils.isUuidV4(header.trim())) {
-            return "dev:" + deviceIdHasher.hashHex(UuidUtils.normalize(header.trim()));
+        if (header != null && UuidUtils.isUuidV4(header)) {
+            return "dev:" + deviceIdHasher.hashHex(header);
         }
         return "ip:" + request.getRemoteAddr();
     }

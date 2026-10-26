@@ -35,9 +35,13 @@ public class AppProperties {
     /** Redis key namespace. Tests override it with a test-only prefix. */
     private String redisKeyPrefix = "zz:bf:v1:";
 
-    private long exportTokenTtlSeconds = 300;
-
     private long maxRequestBodyBytes = 1024L * 1024L;
+
+    /** Fixed-window rate limits, overridable through APP_RATE_LIMIT_* env vars. */
+    private int rateLimitApiPerMinute = 120;
+    private int rateLimitInitPerHour = 10;
+    private int rateLimitExportPerHour = 5;
+    private int rateLimitSyncPerMinute = 30;
 
     @PostConstruct
     void validate() {
@@ -47,8 +51,15 @@ public class AppProperties {
             throw new IllegalStateException(
                     "APP_DEVICE_PEPPER and APP_EXPORT_TOKEN_KEY must be different keys");
         }
-        if (exportTokenTtlSeconds <= 0) {
-            throw new IllegalStateException("app.export-token-ttl-seconds must be positive");
+        requirePositive("app.rate-limit-api-per-minute", rateLimitApiPerMinute);
+        requirePositive("app.rate-limit-init-per-hour", rateLimitInitPerHour);
+        requirePositive("app.rate-limit-export-per-hour", rateLimitExportPerHour);
+        requirePositive("app.rate-limit-sync-per-minute", rateLimitSyncPerMinute);
+    }
+
+    private static void requirePositive(String name, int value) {
+        if (value <= 0) {
+            throw new IllegalStateException(name + " must be positive");
         }
     }
 

@@ -20,6 +20,9 @@ class RateLimitIntegrationTest extends IntegrationTestBase {
         assertThat(blocked.getResponse().getHeader("Retry-After")).isNotNull();
         assertThat(Long.parseLong(blocked.getResponse().getHeader("Retry-After")))
                 .isBetween(1L, 3600L);
+        // Q-18: headers describe the window that rejected the request.
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("10");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("0");
         JsonNode data = body(blocked).path("data");
         assertThat(data.path("scope").asText()).isEqualTo("init");
         assertThat(data.path("limit").asInt()).isEqualTo(10);
@@ -45,6 +48,8 @@ class RateLimitIntegrationTest extends IntegrationTestBase {
         MvcResult blocked = getJson("/api/v1/babies", deviceId);
         assertError(blocked, 429, "RATE_LIMITED");
         assertThat(blocked.getResponse().getHeader("Retry-After")).isNotNull();
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("120");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("0");
         assertThat(body(blocked).path("data").path("scope").asText()).isEqualTo("api");
     }
 }

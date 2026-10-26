@@ -9,10 +9,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class UuidUtilsTest {
 
     @Test
-    void acceptsUuidV4() {
+    void acceptsOnlyCanonicalLowerCaseV4() {
         assertThat(UuidUtils.isUuidV4("f47ac10b-58cc-4372-a567-0e02b2c3d479")).isTrue();
         assertThat(UuidUtils.isUuidV4(UUID.randomUUID().toString())).isTrue();
-        assertThat(UuidUtils.isUuidV4("F47AC10B-58CC-4372-A567-0E02B2C3D479")).isTrue();
+        // Uppercase must be rejected, not normalised (Q-13).
+        assertThat(UuidUtils.isUuidV4("F47AC10B-58CC-4372-A567-0E02B2C3D479")).isFalse();
     }
 
     @Test
@@ -27,15 +28,9 @@ class UuidUtilsTest {
     }
 
     @Test
-    void isUuidAcceptsAnyRfc4122Version() {
+    void isUuidAcceptsAnyRfc4122VersionForRequestIds() {
         assertThat(UuidUtils.isUuid("f47ac10b-58cc-1372-a567-0e02b2c3d479")).isTrue();
         assertThat(UuidUtils.isUuid("abc")).isFalse();
         assertThat(UuidUtils.isUuid(null)).isFalse();
-    }
-
-    @Test
-    void normalisesToLowerCase() {
-        assertThat(UuidUtils.normalize("F47AC10B-58CC-4372-A567-0E02B2C3D479"))
-                .isEqualTo("f47ac10b-58cc-4372-a567-0e02b2c3d479");
     }
 }

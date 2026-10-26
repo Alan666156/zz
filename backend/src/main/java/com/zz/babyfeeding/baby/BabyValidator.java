@@ -55,23 +55,31 @@ public final class BabyValidator {
         if (birthDate == null) {
             throw ValidationExceptions.field("birthDate", "出生日期不能为空");
         }
-        if (birthDate.isAfter(todayUtc)) {
-            throw ValidationExceptions.field("birthDate", "出生日期不能晚于今天");
+        // One-day tolerance on both ends covers client timezones up to UTC+14
+        // (contract addendum Q-11).
+        if (birthDate.isAfter(todayUtc.plusDays(1))) {
+            throw ValidationExceptions.field("birthDate", "出生日期不能晚于明天");
         }
-        if (birthDate.isBefore(todayUtc.minusYears(MAX_AGE_YEARS))) {
-            throw ValidationExceptions.field("birthDate", "出生日期不能早于 3 年前");
+        if (birthDate.isBefore(todayUtc.minusYears(MAX_AGE_YEARS).minusDays(1))) {
+            throw ValidationExceptions.field("birthDate", "出生日期不能早于 3 年前（含 1 天容差）");
         }
     }
 
     public static String normalizeId(String rawId) {
-        if (rawId == null || rawId.isBlank()) {
+        if (rawId == null) {
             return UuidUtils.newUuidV4();
         }
-        String id = rawId.trim();
-        if (!UuidUtils.isUuidV4(id)) {
+        if (!UuidUtils.isUuidV4(rawId)) {
             throw ValidationExceptions.field("id", "id 必须是 UUID v4");
         }
-        return UuidUtils.normalize(id);
+        return rawId;
+    }
+
+    /** Path ids must be exact lower-case canonical UUID v4 (Q-13). */
+    public static void requireUuidV4(String field, String value) {
+        if (!UuidUtils.isUuidV4(value)) {
+            throw ValidationExceptions.field(field, field + " 必须是 UUID v4");
+        }
     }
 
     public static void requireBaseRevision(Integer baseRevision) {

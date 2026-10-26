@@ -27,7 +27,6 @@ class ExportTokenServiceTest {
         AppProperties properties = new AppProperties();
         properties.setDevicePepper("pepper-1234567890");
         properties.setExportTokenKey(key);
-        properties.setExportTokenTtlSeconds(300);
         return new ExportTokenService(properties, new ObjectMapper(),
                 Clock.fixed(now, ZoneOffset.UTC));
     }

@@ -30,13 +30,14 @@ public class ExportTokenService {
 
     private static final int PAYLOAD_VERSION = 1;
     private static final int MAX_TOKEN_LENGTH = 4096;
+    /** Fixed 5-minute TTL; deliberately not configurable (contract Q-16). */
+    private static final long TTL_SECONDS = 300;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
     private final SecretKeySpec keySpec;
     private final ObjectMapper objectMapper;
     private final Clock clock;
-    private final long ttlSeconds;
     private final Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
     private final Base64.Decoder decoder = Base64.getUrlDecoder();
 
@@ -45,11 +46,10 @@ public class ExportTokenService {
                 appProperties.getExportTokenKey().getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         this.objectMapper = objectMapper;
         this.clock = clock;
-        this.ttlSeconds = appProperties.getExportTokenTtlSeconds();
     }
 
     public IssuedToken issue(String deviceHashHex, String babyId, LocalDate from, LocalDate to) {
-        long expiresAtEpochSecond = clock.instant().getEpochSecond() + ttlSeconds;
+        long expiresAtEpochSecond = clock.instant().getEpochSecond() + TTL_SECONDS;
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("v", PAYLOAD_VERSION);
         payload.put("d", deviceHashHex);

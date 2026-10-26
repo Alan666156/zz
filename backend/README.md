@@ -88,7 +88,13 @@ Business rules enforced by the baby API:
 - Soft-deleted records are retained; repeating DELETE returns
   `alreadyDeleted=true` instead of an error.
 - Rate limits (Redis fixed window): api 120/min/device, init 10/hour/IP.
-  Rejections return 429 with `Retry-After`.
+  Rejections return 429 with `Retry-After`; headers report the limit and
+  remaining quota. Limits are overridable through the `APP_RATE_LIMIT_*`
+  variables listed in `.env.example`.
+- UUIDs are lower-case canonical v4. Uppercase ids are rejected, never
+  normalised.
+- `birthDate` accepts `[today - 3 years - 1 day, today + 1 day]` to tolerate
+  client timezones up to UTC+14.
 
 ## Database migrations
 

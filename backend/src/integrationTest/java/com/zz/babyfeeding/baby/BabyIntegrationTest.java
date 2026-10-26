@@ -8,7 +8,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -96,10 +96,10 @@ class BabyIntegrationTest extends IntegrationTestBase {
                 "SELECT COUNT(*) FROM baby", Integer.class)).isEqualTo(1);
 
         deleteJson("/api/v1/babies/" + id + "?baseRevision=1", deviceId);
-        JsonNode afterDelete = body(postJson("/api/v1/babies", deviceId, payload));
-        assertThat(afterDelete.path("data").path("created").asBoolean()).isFalse();
-        assertThat(afterDelete.path("data").path("baby").path("deletedAt").asText())
-                .endsWith("Z");
+        // Q-05: a soft-deleted id is 404 online and is never returned or revived.
+        assertError(postJson("/api/v1/babies", deviceId, payload), 404, "NOT_FOUND");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM baby WHERE deleted_at IS NULL", Integer.class)).isZero();
     }
 
     @Test
@@ -248,20 +248,27 @@ class BabyIntegrationTest extends IntegrationTestBase {
         assertFieldError(postJson("/api/v1/babies", deviceId, badGender), "gender");
 
         Map<String, Object> future = babyPayload("小满", null);
-        future.put("birthDate", LocalDate.now(ZoneOffset.UTC).plusDays(1).toString());
+        future.put("birthDate", LocalDate.now(ZoneOffset.UTC).plusDays(2).toString());
         assertFieldError(postJson("/api/v1/babies", deviceId, future), "birthDate");
 
         Map<String, Object> tooOld = babyPayload("小满", null);
-        tooOld.put("birthDate", LocalDate.now(ZoneOffset.UTC).minusYears(3).minusDays(1).toString());
+        tooOld.put("birthDate", LocalDate.now(ZoneOffset.UTC).minusYears(3).minusDays(2).toString());
         assertFieldError(postJson("/api/v1/babies", deviceId, tooOld), "birthDate");
 
         Map<String, Object> missingBirthDate = babyPayload("小满", null);
         missingBirthDate.remove("birthDate");
         assertFieldError(postJson("/api/v1/babies", deviceId, missingBirthDate), "birthDate");
 
+        Map<String, Object> uppercaseId = babyPayload("大写ID", null);
+        uppercaseId.put("id", "F47AC10B-58CC-4372-A567-0E02B2C3D479");
+        assertFieldError(postJson("/api/v1/babies", deviceId, uppercaseId), "id");
+
         assertFieldError(patchJson("/api/v1/babies/" + babyId, deviceId,
                 Map.of("name", "缺版本号")), "baseRevision");
         assertFieldError(deleteJson("/api/v1/babies/" + babyId, deviceId), "baseRevision");
+        assertFieldError(getJson("/api/v1/babies/not-a-uuid", deviceId), "babyId");
+        assertFieldError(getJson("/api/v1/babies/" + babyId.toUpperCase(Locale.ROOT), deviceId),
+                "babyId");
         assertError(getJson("/api/v1/babies/" + UUID.randomUUID(), deviceId),
                 404, "NOT_FOUND");
 

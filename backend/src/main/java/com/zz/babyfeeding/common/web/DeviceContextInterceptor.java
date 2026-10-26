@@ -46,13 +46,12 @@ public class DeviceContextInterceptor implements HandlerInterceptor {
         if (header == null || header.isBlank()) {
             throw new BusinessException(ErrorCode.DEVICE_ID_REQUIRED);
         }
-        header = header.trim();
+        // Canonical lower-case UUID v4 only; uppercase is invalid (Q-13).
         if (!UuidUtils.isUuidV4(header)) {
             throw new BusinessException(ErrorCode.DEVICE_ID_INVALID);
         }
 
-        String normalizedDeviceId = UuidUtils.normalize(header);
-        byte[] hash = deviceIdHasher.hash(normalizedDeviceId);
+        byte[] hash = deviceIdHasher.hash(header);
         String hashHex = DeviceIdHasher.toHex(hash);
 
         Optional<DeviceRegistry.RegisteredDevice> registered =
@@ -65,7 +64,7 @@ public class DeviceContextInterceptor implements HandlerInterceptor {
             throw new BusinessException(ErrorCode.DEVICE_DISABLED);
         }
 
-        DeviceContext.set(new DeviceContext.Identity(normalizedDeviceId, hashHex, device.id()));
+        DeviceContext.set(new DeviceContext.Identity(header, hashHex, device.id()));
         log.debug("device resolved deviceHash={}", hashHex.substring(0, 8));
         return true;
     }
