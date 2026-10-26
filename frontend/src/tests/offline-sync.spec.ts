@@ -7,10 +7,11 @@ import { useFeedingRecorder } from '@/composables/useFeedingRecorder'
 import { useOfflineSync } from '@/composables/useOfflineSync'
 import { listOutbox } from '@/db/outbox'
 import { useFeedingStore } from '@/stores/feeding'
+import { useGrowthStore } from '@/stores/growth'
 import { useSyncStore } from '@/stores/sync'
 import type { SyncRunOutcome } from '@/stores/sync'
 import { toOffsetISOString, todayLocalDate } from '@/utils/date'
-import type { FeedingRecordInput } from '@/types/models'
+import type { FeedingRecordInput, GrowthRecordInput } from '@/types/models'
 
 const Host = defineComponent({
   setup() {
@@ -37,6 +38,16 @@ function setNavigatorOnline(value: boolean): void {
     configurable: true,
     get: () => value,
   })
+}
+
+function growthInput(): GrowthRecordInput {
+  return {
+    measuredOn: todayLocalDate(),
+    heightCm: 68.5,
+    weightKg: 8.12,
+    headCircumferenceCm: 43,
+    note: null,
+  }
 }
 
 const syncedOutcome: SyncRunOutcome = {
@@ -84,6 +95,47 @@ describe('离线同步横幅（FIX-FE-01）', () => {
     })
     // 离线只刷新计数，不发网络请求、不进入 syncNow
     expect(syncNowSpy).not.toHaveBeenCalled()
+  })
+
+  it('离线删除未同步喂养记录后横幅计数归零（TE04-11）', async () => {
+    const sync = useSyncStore()
+    const feeding = useFeedingStore()
+    feeding.currentBabyId = 'baby-1'
+    feeding.currentDate = todayLocalDate()
+    wrapper = mount(Host)
+
+    const record = await useFeedingRecorder().save(formulaInput(), 'baby-1')
+    await vi.waitFor(() => expect(sync.pendingCount).toBe(1))
+
+    const outcome = await feeding.deleteRecord(record)
+
+    expect(outcome.status).toBe('synced')
+    await vi.waitFor(() => {
+      expect(sync.pendingCount).toBe(0)
+      expect(wrapper!.get('[data-testid="offline-banner"]').text()).not.toContain('待同步 1 条')
+    })
+    expect(await listOutbox()).toHaveLength(0)
+    expect(feeding.records).toHaveLength(0)
+  })
+
+  it('离线删除未同步生长记录后横幅计数归零（TE04-11）', async () => {
+    const sync = useSyncStore()
+    const growth = useGrowthStore()
+    growth.currentBabyId = 'baby-1'
+    wrapper = mount(Host)
+
+    const created = await growth.createRecord(growthInput(), 'baby-1', '2026-03-01')
+    await vi.waitFor(() => expect(sync.pendingCount).toBe(1))
+
+    const outcome = await growth.deleteRecord(created.record!)
+
+    expect(outcome.status).toBe('synced')
+    await vi.waitFor(() => {
+      expect(sync.pendingCount).toBe(0)
+      expect(wrapper!.get('[data-testid="offline-banner"]').text()).not.toContain('待同步 1 条')
+    })
+    expect(await listOutbox()).toHaveLength(0)
+    expect(growth.records).toHaveLength(0)
   })
 
   it('恢复在线后 runSync 正常触发 syncNow', async () => {

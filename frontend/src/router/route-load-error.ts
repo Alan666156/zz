@@ -10,6 +10,8 @@ const CHUNK_ERROR_MARKERS = [
   'Importing a module script failed',
   'ChunkLoadError',
   'error loading dynamically imported module',
+  // 路由组件的 CSS 依赖预加载失败时 Vite 抛的是这句，同样属于 chunk 加载失败（Q-24 / UI-22）
+  'Unable to preload CSS',
 ]
 
 function errorText(error: unknown): string {
@@ -77,6 +79,24 @@ export async function navigateSafely(
     if (reportRouteLoadError(error, target)) return false
     throw error
   }
+}
+
+/**
+ * 重试导航（Q-24）：先做 SPA replace。
+ * Chromium 会按 URL 记住失败的动态 import / CSS 预加载，二次 replace 可能仍然失败；
+ * 在线时退化为整页跳转目标地址，用新文档清掉模块负缓存，确保恢复网络后能到达目标。
+ */
+export async function retryRouteNavigation(
+  router: Router,
+  target: string,
+  options: { hardNavigate?: (target: string) => void } = {},
+): Promise<boolean> {
+  const navigated = await navigateSafely(router, target, { replace: true })
+  if (navigated) return true
+  if (isOffline()) return false
+  const hardNavigate = options.hardNavigate ?? ((url: string) => window.location.assign(url))
+  hardNavigate(target)
+  return true
 }
 
 /** 挂到 router.onError，覆盖 Vant Tabbar 等绕过 navigateSafely 的导航 */

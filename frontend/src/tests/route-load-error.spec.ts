@@ -12,6 +12,7 @@ import {
   installRouteErrorHandler,
   isChunkLoadError,
   navigateSafely,
+  retryRouteNavigation,
 } from '@/router/route-load-error'
 import { useUiStore } from '@/stores/ui'
 
@@ -55,10 +56,14 @@ describe('路由 chunk 加载失败兜底（FIX-FE-11 / Q-24）', () => {
     return { ui }
   }
 
-  it('识别常见的动态 import 失败文案', () => {
+  it('识别常见的动态 import / CSS 预加载失败文案', () => {
     expect(isChunkLoadError(CHUNK_ERROR)).toBe(true)
     expect(isChunkLoadError(new Error('Importing a module script failed.'))).toBe(true)
     expect(isChunkLoadError(Object.assign(new Error('x'), { name: 'ChunkLoadError' }))).toBe(true)
+    // UI-22 实测文案：带具体 CSS 路径，必须按包含匹配
+    expect(isChunkLoadError(new Error('Unable to preload CSS for /assets/index-D9iEsDM-.css'))).toBe(
+      true,
+    )
     expect(isChunkLoadError(new Error('普通错误'))).toBe(false)
   })
 
@@ -115,6 +120,35 @@ describe('路由 chunk 加载失败兜底（FIX-FE-11 / Q-24）', () => {
 
     expect(showSpy).toHaveBeenCalledTimes(1)
     expect(ui.routeLoadErrorVisible).toBe(true)
+  })
+
+  it('CSS 预加载失败也弹框且路由不变（UI-22）', async () => {
+    vi.stubGlobal('navigator', { onLine: false })
+    const cssError = new Error('Unable to preload CSS for /assets/index-D9iEsDM-.css')
+    const router = makeRouter(() => Promise.reject(cssError))
+    const { ui } = await mountDialog(router)
+
+    await navigateSafely(router, { name: 'records' })
+    await flushPromises()
+
+    expect(ui.routeLoadErrorVisible).toBe(true)
+    expect(router.currentRoute.value.name).toBe('home')
+    expect(wrapper!.get('[data-testid="route-load-error"]').text()).toContain(
+      '当前网络不可用，页面尚未加载，请恢复网络后重试',
+    )
+  })
+
+  it('在线重试仍失败时整页跳转目标地址，绕过失败模块负缓存（UI-22）', async () => {
+    vi.stubGlobal('navigator', { onLine: true })
+    const router = makeRouter(() => Promise.reject(CHUNK_ERROR))
+    await mountDialog(router)
+    const hardNavigate = vi.fn()
+
+    const navigated = await retryRouteNavigation(router, '/records', { hardNavigate })
+    await flushPromises()
+
+    expect(navigated).toBe(true)
+    expect(hardNavigate).toHaveBeenCalledWith('/records')
   })
 
   it('在线导航失败：显示通用文案；取消后留在当前页', async () => {
