@@ -2,10 +2,10 @@
 
 本目录是根级测试工作区，包含 **API 契约测试** 与 **端到端（E2E）测试**。
 
-- 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（TE-01b 修订，169 条）
+- 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（Q-24 后 173 条）
 - 技术契约：[`../docs/architecture/v1.0-baby-feeding.md`](../docs/architecture/v1.0-baby-feeding.md)
-- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-18，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
-- 当前状态：**TE-02**。`api/**` 的 131 条已从 skip 骨架改为可执行断言；`e2e/**` 的 21 条仍为 TE-03 待实现的 skip 骨架。可执行性只表示断言已按契约写好，**不代表已对后端跑通**（见 §6 环境前提）。
+- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-24，冲突时以此为准；导出 token 短字段名以 f7a7f6e、同步锁 key 以 63b9b02 为准）
+- 当前状态：**TE-05**。`api/**` 134 条与 `e2e/**` 22 条均已实现为可执行断言。可执行性只表示断言已按契约写好，**不代表全部通过**；已知失败与阻塞见[`../docs/tests/v1.0-te04-defects.md`](../docs/tests/v1.0-te04-defects.md)。
 
 ---
 
@@ -115,7 +115,7 @@ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci
 npx playwright test --list
 ```
 
-当前应列出 **152 条 Playwright 用例**（131 条 API + 21 条 E2E），全部为 skipped；用例文档共 169 条，其余 17 条为 DB/PERF/COMPAT/MANUAL，不由 Playwright 执行。这只证明配置/骨架可加载，不代表功能通过。
+当前应列出 **156 条 Playwright 用例**（134 条 API + 22 条 E2E）；用例文档共 173 条，其余 17 条为 DB/PERF/COMPAT/MANUAL，不由 Playwright 执行。这只证明配置/用例可加载，不代表功能通过。
 
 ---
 
@@ -172,14 +172,14 @@ npm run reset:env
 # API 契约测试（TE-02 已实现，需可用的后端/MySQL/Redis 与 §4 凭据）
 npm run test:api
 
-# E2E（TE-03 待实现；需前端 preview）
+# E2E（TE-05；需前端 preview）
 npm run test:e2e
 
 # 全部
 npm test
 ```
 
-`npx playwright test --list` 列出 **152 条**：131 条 API（TE-02 可执行断言）+ 21 条 E2E（TE-03 skip 骨架）。另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
+`npx playwright test --list` 列出 **156 条**：134 条 API + 22 条 E2E。另有 13 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行。
 
 **执行前提**：后端已实现对应接口，且 `DB_PASSWORD`、`REDIS_PASSWORD`、`APP_DEVICE_PEPPER`、`APP_EXPORT_TOKEN_KEY` 与本机 MySQL/Redis 可达。缺少任一条件时 API 套件会在 `beforeEach` 的 Redis/DB 辅助函数处报错，属于环境未就绪，不是断言失败。仅实现 BE-01..BE-03 的后端只能覆盖 GEN/DEV/BABY/HEALTH，其余模块会因 404/校验差异失败。
 
