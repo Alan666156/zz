@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  babyBirthDateBounds,
   validateAmount,
   validateBabyName,
   validateBirthDate,
@@ -21,8 +22,8 @@ describe('validation', () => {
     expect(validateBabyName('a\u0000b')).not.toBeNull()
   })
 
-  it('出生日期范围：今天±1 天容差，最早 3 年 1 天前（Q-11）', () => {
-    const now = new Date(2026, 9, 26)
+  it('出生日期范围：UTC 今天 ±1 天容差，最早 3 年 1 天前（Q-11）', () => {
+    const now = new Date('2026-10-26T12:00:00.000Z')
     expect(validateBirthDate('2026-10-26', now)).toBeNull()
     // 客户端允许 +1 天时区容差
     expect(validateBirthDate('2026-10-27', now)).toBeNull()
@@ -32,6 +33,19 @@ describe('validation', () => {
     expect(validateBirthDate('2023-10-24', now)).not.toBeNull()
     expect(validateBirthDate('', now)).not.toBeNull()
     expect(validateBirthDate('2026-02-31', now)).not.toBeNull()
+  })
+
+  it('UTC+14 等本地已跨天时，上限仍按 UTC 今天计算（Q-11）', () => {
+    // UTC 日期 2026-10-26，但模拟本地日期已是 2026-10-27
+    const now = new Date('2026-10-26T20:00:00.000Z')
+    Object.defineProperty(now, 'getFullYear', { value: () => 2026 })
+    Object.defineProperty(now, 'getMonth', { value: () => 9 })
+    Object.defineProperty(now, 'getDate', { value: () => 27 })
+
+    expect(babyBirthDateBounds(now)).toEqual({ min: '2023-10-25', max: '2026-10-27' })
+    expect(validateBirthDate('2026-10-27', now)).toBeNull()
+    // 若误用本地今天会放宽到 10-28，服务端将返回 400
+    expect(validateBirthDate('2026-10-28', now)).not.toBeNull()
   })
 
   it('备注/标签/数值/时长边界', () => {

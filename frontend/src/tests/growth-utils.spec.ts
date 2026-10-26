@@ -27,7 +27,7 @@ function record(overrides: Partial<GrowthRecord>): GrowthRecord {
   }
 }
 
-const NOW = new Date('2026-10-26T12:00:00')
+const NOW = new Date('2026-10-26T12:00:00.000Z')
 
 describe('growth utils', () => {
   it('校验范围、精度与至少一项指标', () => {
@@ -89,6 +89,21 @@ describe('growth utils', () => {
         NOW,
       ),
     ).toContain('备注')
+  })
+
+  it('本地日期已跨天时，measurement 上限仍按 UTC 今天 +1（Q-11）', () => {
+    // UTC 日期 2026-10-26，模拟本地已是 2026-10-27（如 UTC+14）
+    const now = new Date('2026-10-26T20:00:00.000Z')
+    Object.defineProperty(now, 'getFullYear', { value: () => 2026 })
+    Object.defineProperty(now, 'getMonth', { value: () => 9 })
+    Object.defineProperty(now, 'getDate', { value: () => 27 })
+
+    expect(
+      validateGrowthInput({ measuredOn: '2026-10-27', weightKg: 8 }, '2026-03-01', now),
+    ).toBeNull()
+    expect(
+      validateGrowthInput({ measuredOn: '2026-10-28', weightKg: 8 }, '2026-03-01', now),
+    ).toContain('允许范围')
   })
 
   it('表单解析字符串并保留字段级错误', () => {

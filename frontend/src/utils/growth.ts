@@ -7,8 +7,8 @@ import type {
 import {
   addDaysToDateString,
   parseLocalDate,
-  todayLocalDate,
   toLocalDateString,
+  toUtcDateString,
 } from './date'
 import { countChars } from './validation'
 
@@ -102,8 +102,8 @@ function validateMeasuredOn(value: string, birthDate: string, now: Date): string
   if (Number.isNaN(parsed.getTime()) || toLocalDateString(parsed) !== value) {
     return '测量日期格式不正确'
   }
-  // Q-11：允许 +1 天时区容差，不用本地“今天”硬卡
-  const maxDate = addDaysToDateString(todayLocalDate(now), 1)
+  // Q-11：以服务端 UTC 今天为准，允许 +1 天时区容差
+  const maxDate = addDaysToDateString(toUtcDateString(now), 1)
   if (value > maxDate) return '测量日期超出允许范围'
   if (birthDate && value < birthDate) return '测量日期不能早于宝宝出生日期'
   return null

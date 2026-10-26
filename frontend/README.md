@@ -268,7 +268,7 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 83.5 KB |
+| 首屏 JS | ≤ 200 KB gzip | 83.6 KB |
 | 首屏 CSS | ≤ 50 KB gzip | 32.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 
@@ -281,7 +281,7 @@ ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页
 - `navigator.locks` 缺失时自动降级到 `zz.bf.syncLock` 时间戳锁；`navigator.clipboard` 缺失时提示手动复制。
 - 导出下载使用 `<a target="_blank">` 导航，不使用 `URL.createObjectURL`（微信/iOS WebView 对 blob 下载支持差）。
 - 不使用 `structuredClone`（WebView 版本覆盖不足），写入 IndexedDB 前统一 JSON 拷贝（`toPlain`）。
-- 时间一律用本地时区字符串与 `tzOffsetMinutes` 表达；日期比较允许 ±1 天时区容差（Q-11）。
+- 时间一律用本地时区字符串与 `tzOffsetMinutes` 表达；日期上下限按服务端 `serverToday = UTC 今天` 计算并允许 ±1 天容差（Q-11）：`birthDate ∈ [utcToday-3年-1天, utcToday+1天]`，`measuredOn ∈ [birthDate, utcToday+1天]`。`utils/date.ts` 的 `toUtcDateString()` 是唯一口径来源，禁止用本地“今天”卡范围。
 - 设备 UUID 存储与请求头统一小写（Q-13），历史大写值读取时归一化。
 
 ### 已知限制

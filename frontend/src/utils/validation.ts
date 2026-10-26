@@ -7,7 +7,7 @@ import {
   MAX_TAGS,
   type FeedingTag,
 } from '@/types/models'
-import { toLocalDateString } from './date'
+import { toLocalDateString, toUtcDateString } from './date'
 
 // 昵称/备注禁止控制字符，这是有意的安全校验
 // eslint-disable-next-line no-control-regex
@@ -33,13 +33,16 @@ export function validateBabyName(raw: string, allowEmpty = false): string | null
 }
 
 /**
- * Q-11：服务端按 UTC 今天判定，客户端允许 ±1 天时区容差。
- * 合法区间 [今天-3年-1天, 今天+1天]，不用本地“今天”硬卡。
+ * Q-11：服务端按 UTC 今天（serverToday）判定，客户端允许 ±1 天时区容差。
+ * 合法区间 [utcToday-3年-1天, utcToday+1天]。
+ * 必须用 UTC 日期而非本地“今天”：UTC+14 时本地已跨天，用本地会放宽到 UTC+2 被服务端 400。
  */
 export function babyBirthDateBounds(now: Date = new Date()): { min: string; max: string } {
-  const minDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate() - 1)
-  const maxDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  return { min: toLocalDateString(minDate), max: toLocalDateString(maxDate) }
+  const utcToday = toUtcDateString(now)
+  const [year, month, day] = utcToday.split('-').map((part) => Number(part))
+  const minDate = new Date(Date.UTC(year - 3, month - 1, day - 1))
+  const maxDate = new Date(Date.UTC(year, month - 1, day + 1))
+  return { min: toUtcDateString(minDate), max: toUtcDateString(maxDate) }
 }
 
 export function validateBirthDate(value: string, now: Date = new Date()): string | null {
