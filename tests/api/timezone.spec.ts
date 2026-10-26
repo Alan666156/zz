@@ -3,7 +3,7 @@ import { test } from '@playwright/test';
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §3.4、§4.7
  * 用例：docs/tests/v1.0.md §9（TZ-01..TZ-06）
- * 状态：TE-01 骨架；TE-02 实现断言。
+ * 状态：TE-01b 骨架；TE-02 实现断言。
  */
 test.describe('时区与本地日期（TZ）', () => {
   test.skip('TZ-01 +08:00 午夜边界', async () => {});

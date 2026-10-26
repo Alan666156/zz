@@ -3,7 +3,7 @@ import { test } from '@playwright/test';
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §4.6、§4.3、§3.4
  * 用例：docs/tests/v1.0.md §8（FEED-01..FEED-24）
- * 状态：TE-01 骨架；TE-02 实现断言。
+ * 状态：TE-01b 骨架；TE-02 实现断言。
  */
 test.describe('喂养记录（FEED）', () => {
   test.skip('FEED-01 创建母乳记录（精确响应）', async () => {});
@@ -21,7 +21,7 @@ test.describe('喂养记录（FEED）', () => {
   test.skip('FEED-13 endedAt 校验', async () => {});
   test.skip('FEED-14 备注与标签校验', async () => {});
   test.skip('FEED-15 babyId 不存在或不属于当前设备', async () => {});
-  test.skip('FEED-16 GET by id 返回 tombstone', async () => {});
+  test.skip('FEED-16 已删除记录：在线读取/修改 404、删除幂等', async () => {});
   test.skip('FEED-17 按本地日期回溯', async () => {});
   test.skip('FEED-18 from/to 闭区间与跨度上限', async () => {});
   test.skip('FEED-19 日期参数互斥、类型过滤与分页', async () => {});

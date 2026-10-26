@@ -2,9 +2,10 @@
 
 本目录是根级测试工作区，包含 **API 契约测试** 与 **端到端（E2E）测试**。
 
-- 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（TE-01 产出，168 条）
+- 用例与精确断言：[`../docs/tests/v1.0.md`](../docs/tests/v1.0.md)（TE-01b 修订，169 条）
 - 技术契约：[`../docs/architecture/v1.0-baby-feeding.md`](../docs/architecture/v1.0-baby-feeding.md)
-- 当前状态：**TE-01 骨架**。所有用例以 `test.skip` 注册，`npx playwright test --list` 可列出；真实断言在 TE-02（API）与 TE-03（E2E）实现。
+- 边界裁决：[`../docs/architecture/v1.0-contract-addendum.md`](../docs/architecture/v1.0-contract-addendum.md)（Q-01~Q-18，冲突时以此为准；导出 token 短字段名以 f7a7f6e 为准）
+- 当前状态：**TE-01b 骨架**。所有用例以 `test.skip` 注册，`npx playwright test --list` 可列出；真实断言在 TE-02（API）与 TE-03（E2E）实现。
 
 ---
 
@@ -21,7 +22,8 @@ tests/
 ├── api/
 │   ├── helpers/
 │   │   ├── api-client.ts     # 统一响应包、错误断言、设备客户端
-│   │   ├── env.ts            # API/Web 地址、zz_e2e、Redis DB14
+│   │   ├── env.ts            # API/Web 地址、zz_e2e、Redis DB14、限流阈值
+│   │   ├── export-token.ts   # addendum §4 canonical 自签导出 token
 │   │   └── fixtures.ts       # 宝宝/喂养/生长/同步夹具
 │   ├── common.spec.ts        # GEN-01..11
 │   ├── devices.spec.ts       # DEV-01..06
@@ -31,7 +33,7 @@ tests/
 │   ├── stats.spec.ts         # STATS-01..09
 │   ├── growth.spec.ts        # GROWTH-01..12
 │   ├── export.spec.ts        # EXP-01..12
-│   ├── sync.spec.ts          # SYNC-01..16
+│   ├── sync.spec.ts          # SYNC-01..17
 │   ├── isolation-security.spec.ts  # ISO-01..05、SEC-01..03
 │   ├── health.spec.ts        # HEALTH-01..03
 │   └── rate-limit.spec.ts    # RL-01..06（独立运行）
@@ -107,7 +109,7 @@ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci
 npx playwright test --list
 ```
 
-当前应列出 **151 条 Playwright 用例**（130 条 API + 21 条 E2E），全部为 skipped；用例文档共 168 条，其余 17 条为 DB/PERF/COMPAT/MANUAL，不由 Playwright 执行。这只证明配置/骨架可加载，不代表功能通过。
+当前应列出 **152 条 Playwright 用例**（131 条 API + 21 条 E2E），全部为 skipped；用例文档共 169 条，其余 17 条为 DB/PERF/COMPAT/MANUAL，不由 Playwright 执行。这只证明配置/骨架可加载，不代表功能通过。
 
 ---
 
@@ -129,7 +131,11 @@ set +a
 | `REDIS_DATABASE` | `14` | 重置脚本强制校验 |
 | `DB_PASSWORD` / `REDIS_PASSWORD` | 无 | 必填，仅本机 |
 | `RUN_RATE_LIMIT` | `0` | 设为 `1` 才执行限流专项 |
-| `APP_EXPORT_TOKEN_KEY` | 无 | TE-02 过期 token 用例使用（测试专用） |
+| `APP_EXPORT_TOKEN_KEY` | 无 | TE-02 过期 token 用例使用（测试专用，禁止生产值） |
+| `APP_RATE_LIMIT_API_PER_MINUTE` | `120` | 后端与测试上下文必须一致（Q-12） |
+| `APP_RATE_LIMIT_INIT_PER_HOUR` | `10` | 同上 |
+| `APP_RATE_LIMIT_EXPORT_PER_HOUR` | `5` | 同上 |
+| `APP_RATE_LIMIT_SYNC_PER_MINUTE` | `30` | 同上 |
 
 ---
 
@@ -163,16 +169,20 @@ npm run test:e2e
 npm test
 ```
 
-当前（TE-01）所有用例 skipped，运行结果是 `168 skipped`，属于预期。
+当前（TE-01b）所有 Playwright 用例 skipped，运行结果是 `152 skipped`；另有 17 条 DB/PERF/COMPAT/MANUAL 用例不由 Playwright 执行，属于预期。
 
 ### 限流专项
 
-限流用例会耗尽额度，**必须独立运行**：
+限流用例会耗尽额度，**必须独立运行**，且后端与测试进程使用同一组低阈值：
 
 ```bash
 npm run reset:env
-RUN_RATE_LIMIT=1 npx playwright test --project=api api/rate-limit.spec.ts
+APP_RATE_LIMIT_API_PER_MINUTE=5 APP_RATE_LIMIT_INIT_PER_HOUR=3 \
+APP_RATE_LIMIT_EXPORT_PER_HOUR=2 APP_RATE_LIMIT_SYNC_PER_MINUTE=3 \
+RUN_RATE_LIMIT=1 npm run test:rate-limit
 ```
+
+后端启动时也必须带上同样的 `APP_RATE_LIMIT_*`，否则响应头 `X-RateLimit-Limit` 与测试期望不一致。
 
 ---
 
@@ -184,20 +194,23 @@ RUN_RATE_LIMIT=1 npx playwright test --project=api api/rate-limit.spec.ts
 - E2E：每个场景新建 context，首次打开生成新设备 UUID；断言通过从首个 `/api/v1/` 请求捕获的 `X-Device-Id` 做后端核对。
 - API：每个 spec/describe 使用独立设备 UUID；TE-02 可增加设备池（见用例文档 §24.1）。
 
-### 7.2 init 限流约束
+### 7.2 init 限流约束（Q-12 已裁决）
 
-后端契约为 `POST /devices/init` 10 次/小时/IP。E2E 有 21 个场景、API 套件需要多个设备，若不清 Redis 会触发 429。
+后端契约默认 `POST /devices/init` 10 次/小时/IP。E2E 有 21 个场景、API 套件需要多个设备，若不清 Redis 会触发 429。
 
-处理方式（二选一，TE-03 前与 Lead/architect 确认，用例文档 Q-12）：
+已裁决方案：
 
-1. **推荐**：每个场景/每个 spec 前执行 `FLUSHDB 14`（仅 DB14），清空限流计数；业务数据在 MySQL，缓存可重建。
-2. 测试实例通过环境变量调高 init 额度（需要后端支持，当前契约未定义）。
+1. 每个场景/每个 spec 前执行 `FLUSHDB 14`（仅 DB14），清空限流计数；业务数据在 MySQL，缓存可重建。
+2. 测试实例通过 `APP_RATE_LIMIT_*` 调低（或调高）额度；后端与测试上下文必须一致。
+3. 统一 `workers: 1`、`fullyParallel: false`；限流专项用独立低阈值上下文单独运行。
 
 ### 7.3 其它已知约束
 
 - 本机 Chrome 版本与 Playwright 1.6x 兼容；若 `channel: 'chrome'` 启动失败，设置 `channel: 'msedge'`（本机已装 Edge）。
 - 3 秒/1 秒计时受机器负载影响，取 3 次中位数并记录环境；超时按缺陷处理，不放宽断言。
-- CSV 时间格式/中文标签映射、选择器 `data-testid` 等存在契约缺口，见用例文档 §23；未确认前相关断言用 `test.fixme` 标记。
+- CSV 格式、精度、标签顺序、tombstone 语义已由 addendum 裁决并体现在用例文档 §23；仍待落地的是前端 `data-testid` 清单（Q-14）与 FE-07 文案（Q-15）。
+- 导出过期 token 用例依赖测试专用 `APP_EXPORT_TOKEN_KEY` 与 `api/helpers/export-token.ts` 的 canonical 自签（短字段 `v,d,b,f,t,e,n`，base64url 无 padding）；禁止使用生产密钥。
+- 同步锁用例（SYNC-16）通过预占 Redis `lock:sync:{deviceId}` 确定性触发，不再依赖并发碰运气。
 - 规模用例（10,001 行导出）通过仅限 `zz_e2e` 的直接 SQL 造数，运行后必须重置。
 - 真机兼容（iOS 14 / Android 10 / 微信 / 支付宝）与 WebView 下载兜底只能人工执行，见用例文档 §19/§20。
 
@@ -207,6 +220,6 @@ RUN_RATE_LIMIT=1 npx playwright test --project=api api/rate-limit.spec.ts
 
 1. 断言以 `docs/tests/v1.0.md` 的“精确断言”为准，不自行放宽。
 2. 用例 ID 保留在测试标题中（如 `GEN-01 ...`），便于缺陷报告追溯。
-3. 发现契约缺口时先在用例文档 §23 登记，不猜测后修改断言。
+3. 边界语义以 addendum 为准；发现新缺口先在用例文档 §23 登记，不猜测后修改断言。
 4. 测试代码只出现在 `tests/**`；不在集成分支改 `backend/**`、`frontend/**`。
 5. 不执行 `git push`；提交留在 `feat/integration`。

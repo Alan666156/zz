@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * 婴儿喂养 App V1.0 验收测试配置（TE-01 骨架）。
+ * 婴儿喂养 App V1.0 验收测试配置（TE-01b 骨架）。
  *
  * 设计约束（见 docs/tests/v1.0.md §2）：
  * - 使用本机 Chrome：channel: 'chrome'，不下载 Chromium。

@@ -3,7 +3,7 @@ import { test } from '@playwright/test';
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §2.5、§4.5、§4.6、§4.7、§4.8、§4.9
  * 用例：docs/tests/v1.0.md §15（ISO-01..ISO-05）、§16（SEC-01..SEC-03）
- * 状态：TE-01 骨架；TE-02 实现断言。
+ * 状态：TE-01b 骨架；TE-02 实现断言。
  */
 test.describe('设备隔离（ISO）', () => {
   test.skip('ISO-01 列表、统计、趋势不泄露其他设备数据', async () => {});

@@ -3,7 +3,7 @@ import { test } from '@playwright/test';
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §4.4、§4.2、§3.2.2
  * 用例：docs/tests/v1.0.md §6（DEV-01..DEV-06）
- * 状态：TE-01 骨架；TE-02 实现断言。
+ * 状态：TE-01b 骨架；TE-02 实现断言。
  */
 test.describe('设备（DEV）', () => {
   test.skip('DEV-01 新设备初始化', async () => {});

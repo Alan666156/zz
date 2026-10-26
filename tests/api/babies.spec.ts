@@ -3,14 +3,14 @@ import { test } from '@playwright/test';
 /**
  * 契约：docs/architecture/v1.0-baby-feeding.md §4.5、§4.3、§3.4
  * 用例：docs/tests/v1.0.md §7（BABY-01..BABY-17）
- * 状态：TE-01 骨架；TE-02 实现断言。
+ * 状态：TE-01b 骨架；TE-02 实现断言。
  */
 test.describe('宝宝档案（BABY）', () => {
   test.skip('BABY-01 创建第一个宝宝自动成为默认', async () => {});
   test.skip('BABY-02 名称去空格与 Unicode 长度边界', async () => {});
   test.skip('BABY-03 相同 id 重复创建幂等', async () => {});
   test.skip('BABY-04 性别默认值与非法枚举', async () => {});
-  test.skip('BABY-05 出生日期边界', async () => {});
+  test.skip('BABY-05 出生日期边界（UTC + ±1 天容差）', async () => {});
   test.skip('BABY-06 最多 5 个宝宝', async () => {});
   test.skip('BABY-07 默认宝宝切换是原子的', async () => {});
   test.skip('BABY-08 列表排序、排除已删除、设备隔离', async () => {});
