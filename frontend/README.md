@@ -123,6 +123,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 - 在线 `GET/PATCH/DELETE` 遇到 404 视为“记录已不存在”：从本机缓存与 Pinia 移除（编辑场景提示“记录已不存在，已从本机移除”）。
 - `PATCH` 请求体**不得**包含 `babyId`（Q-04），前端由 `toFeedingPatchData()` 统一剥离。
 - 设备注册（UI-01）：任意请求返回 409 `DEVICE_NOT_REGISTERED` 时，`api/client.ts` 通过 device store 的 `onDeviceNotRegistered()` 初始化后重试一次，而不是直接调 `initDevice()`；store 内并发 `init()` 共享同一个进行中请求，`registered` 置位后 router 的 `ensureInitialized()` 不再发请求。
+- 列表合并（FE-04）：宝宝 / 喂养 / 生长的服务端列表按 outbox 未完成项（`pendingOutboxOps()`）合并——pending `UPSERT` 的 id 用本地值覆盖服务端旧值，pending `DELETE` 的 id 从服务端列表剔除且不得复活；其余记录以服务端为准。离线编辑过的已同步记录、离线删除但服务端仍存在的记录都不会被一次刷新抹掉。
 
 ## `data-testid` 清单（Q-14）
 

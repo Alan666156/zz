@@ -14,7 +14,7 @@ import {
   putBabiesCache,
   replaceBabiesCache,
 } from '@/db'
-import { enqueueOutbox, outboxKey, removeOutbox } from '@/db/outbox'
+import { enqueueOutbox, outboxKey, pendingOutboxOps, removeOutbox } from '@/db/outbox'
 import { MAX_BABIES, type Baby, type BabyInput } from '@/types/models'
 import { getStorageItem, removeStorageItem, setStorageItem } from '@/utils/storage'
 import { requestSync } from '@/utils/sync-events'
@@ -167,10 +167,24 @@ export const useBabyStore = defineStore('baby', {
       if (this.refreshing) return
       this.refreshing = true
       try {
-        const serverBabies = await fetchBabies()
-        // 保留尚未同步成功的本地宝宝（revision=0）
+        const fetched = await fetchBabies()
+        // 以 outbox 未完成项为准：pending 编辑用本地值，pending DELETE 不得被服务端复活
+        const pendingOps = await pendingOutboxOps('BABY').catch(
+          () => new Map<string, 'UPSERT' | 'DELETE'>(),
+        )
+        const localById = new Map(this.babies.map((local) => [local.id, local]))
+        const serverBabies = fetched
+          .filter((server) => pendingOps.get(server.id) !== 'DELETE')
+          .map((server) =>
+            pendingOps.has(server.id) ? localById.get(server.id) ?? server : server,
+          )
+        const serverIds = new Set(serverBabies.map((server) => server.id))
+        // 保留未同步成功的本地宝宝（revision=0 或 outbox 仍有未完成项）
         const pendingLocal = this.babies.filter(
-          (local) => local.revision === 0 && !serverBabies.some((server) => server.id === local.id),
+          (local) =>
+            !serverIds.has(local.id) &&
+            ((pendingOps.has(local.id) && pendingOps.get(local.id) !== 'DELETE') ||
+              local.revision === 0),
         )
         const merged = [...serverBabies, ...pendingLocal]
         this.setList(merged)

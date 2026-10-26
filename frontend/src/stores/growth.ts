@@ -11,7 +11,13 @@ import {
   getGrowthRecordsByBaby,
   putGrowthRecordCache,
 } from '@/db'
-import { enqueueOutbox, listOutbox, outboxKey, removeOutbox } from '@/db/outbox'
+import {
+  enqueueOutbox,
+  listOutbox,
+  outboxKey,
+  pendingOutboxOps,
+  removeOutbox,
+} from '@/db/outbox'
 import type { GrowthRecord, GrowthRecordInput } from '@/types/models'
 import {
   latestGrowthRecord,
@@ -172,10 +178,24 @@ export const useGrowthStore = defineStore('growth', {
       try {
         const result = await listGrowthRecords({ babyId, page: 1, size: 100 })
         if (seq !== this.loadSeq) return
-        const serverItems = result.items.filter((record) => !record.deletedAt)
+        // 以 outbox 未完成项为准：pending 编辑用本地值，pending DELETE 不得被服务端复活
+        const pendingOps = await pendingOutboxOps('GROWTH_RECORD').catch(
+          () => new Map<string, 'UPSERT' | 'DELETE'>(),
+        )
+        if (seq !== this.loadSeq) return
+        const localAll = [...cached, ...pendingSnapshot]
+        const localById = new Map(localAll.map((record) => [record.id, record]))
+        const serverItems = result.items
+          .filter((record) => !record.deletedAt && pendingOps.get(record.id) !== 'DELETE')
+          .map((record) =>
+            pendingOps.has(record.id) ? localById.get(record.id) ?? record : record,
+          )
         const serverIds = new Set(serverItems.map((record) => record.id))
-        const pendingLocal = [...cached, ...pendingSnapshot].filter(
-          (record) => record.revision === 0 && !serverIds.has(record.id),
+        const pendingLocal = localAll.filter(
+          (record) =>
+            !serverIds.has(record.id) &&
+            ((pendingOps.has(record.id) && pendingOps.get(record.id) !== 'DELETE') ||
+              record.revision === 0),
         )
         const merged = [...serverItems, ...pendingLocal]
         this.mergeRecords(merged)

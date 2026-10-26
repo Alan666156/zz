@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError } from '@/api/client'
 import { getBabiesCache, putBabyCache } from '@/db'
-import { getOutboxItem, listOutbox, outboxKey } from '@/db/outbox'
+import { enqueueOutbox, getOutboxItem, listOutbox, outboxKey } from '@/db/outbox'
 import { useBabyStore } from '@/stores/baby'
 import type { Baby } from '@/types/models'
 
@@ -131,5 +131,48 @@ describe('baby store', () => {
     await store.setDefault('b')
     expect(store.babies.find((baby) => baby.id === 'b')?.isDefault).toBe(true)
     expect(store.babies.find((baby) => baby.id === 'a')?.isDefault).toBe(false)
+  })
+
+  it('pending 编辑不被服务端旧值覆盖', async () => {
+    const local = makeBaby({ id: 'a', name: '本地新名', revision: 1 })
+    const store = useBabyStore()
+    store.babies = [local]
+    await enqueueOutbox({
+      entityType: 'BABY',
+      entityId: local.id,
+      op: 'UPSERT',
+      baseRevision: 1,
+      data: {
+        name: local.name,
+        gender: local.gender,
+        birthDate: local.birthDate,
+        isDefault: local.isDefault,
+      },
+    })
+    apiMocks.fetchBabies.mockResolvedValue([
+      makeBaby({ id: 'a', name: '服务端旧名', revision: 1 }),
+    ])
+
+    await store.refreshFromServer()
+
+    expect(store.babies[0].name).toBe('本地新名')
+    expect((await getBabiesCache())[0].name).toBe('本地新名')
+  })
+
+  it('pending DELETE 不被服务端列表复活', async () => {
+    const store = useBabyStore()
+    store.babies = []
+    await enqueueOutbox({
+      entityType: 'BABY',
+      entityId: 'a',
+      op: 'DELETE',
+      baseRevision: 1,
+    })
+    apiMocks.fetchBabies.mockResolvedValue([makeBaby({ id: 'a' })])
+
+    await store.refreshFromServer()
+
+    expect(store.babies).toHaveLength(0)
+    expect(await getBabiesCache()).toHaveLength(0)
   })
 })
