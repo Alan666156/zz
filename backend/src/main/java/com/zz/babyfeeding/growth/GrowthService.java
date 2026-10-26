@@ -291,7 +291,8 @@ public class GrowthService {
         }
     }
 
-    private GrowthRecordResponse toResponse(GrowthRecordEntity entity) {
+    /** Shared with sync, the only entry point that may return a tombstone (Q-07). */
+    public GrowthRecordResponse toResponse(GrowthRecordEntity entity) {
         return new GrowthRecordResponse(
                 entity.getId(),
                 entity.getBabyId(),

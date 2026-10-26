@@ -33,7 +33,7 @@ import java.util.Optional;
 @Service
 public class BabyService {
 
-    static final int MAX_BABIES = 5;
+    public static final int MAX_BABIES = 5;
     private static final Duration STATS_VERSION_TTL = Duration.ofDays(7);
 
     private final BabyMapper babyMapper;
@@ -294,7 +294,8 @@ public class BabyService {
         return new BusinessException(ErrorCode.CONFLICT, "数据版本冲突", data);
     }
 
-    static BabyResponse toResponse(BabyEntity entity) {
+    /** Shared with sync, which returns the same online record shape (no tombstone endpoint). */
+    public static BabyResponse toResponse(BabyEntity entity) {
         return new BabyResponse(
                 entity.getId(),
                 entity.getName(),

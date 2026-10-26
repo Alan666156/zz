@@ -370,7 +370,8 @@ public class FeedingService {
                 STATS_VERSION_TTL);
     }
 
-    private FeedingRecordResponse toResponse(FeedingRecordEntity entity) {
+    /** Shared with sync, the only entry point that may return a tombstone (Q-07). */
+    public FeedingRecordResponse toResponse(FeedingRecordEntity entity) {
         OffsetDateTime startedAt =
                 TimeUtils.fromUtc(entity.getStartedAt(), entity.getTzOffsetMinutes());
         OffsetDateTime endedAt = entity.getEndedAt() == null ? null
