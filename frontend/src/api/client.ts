@@ -71,6 +71,30 @@ function toApiError(error: AxiosError<ApiEnvelope<unknown>>): ApiError {
 }
 
 /**
+ * 409 兜底初始化：走 device store，保证 registered 状态同步，
+ * 后续 ensureInitialized() 不会重复 init。
+ * 用动态 import 避免 client ↔ store 的顶层循环依赖。
+ */
+async function registerDeviceViaStore(): Promise<void> {
+  try {
+    const { useDeviceStore } = await import('@/stores/device')
+    const store = useDeviceStore()
+    const ok = await store.onDeviceNotRegistered()
+    if (!ok) {
+      throw new ApiError(
+        'DEVICE_NOT_REGISTERED',
+        409,
+        store.lastError ?? '设备初始化失败',
+      )
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    // Pinia 未激活等极端场景：退回直接 init（不更新 store）
+    await initDevice()
+  }
+}
+
+/**
  * 统一响应包处理：
  * - HTTP 200 + code!=OK 也视为业务错误
  * - 409 DEVICE_NOT_REGISTERED：自动 init 后重试一次（仅一次）
@@ -101,7 +125,7 @@ http.interceptors.response.use(
     ) {
       config._deviceRetried = true
       try {
-        await initDevice()
+        await registerDeviceViaStore()
         return await http.request(config)
       } catch (retryError) {
         if (retryError instanceof ApiError) throw retryError
