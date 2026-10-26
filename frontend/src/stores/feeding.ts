@@ -420,6 +420,8 @@ export const useFeedingStore = defineStore('feeding', {
       await this.refreshPendingCount()
 
       if (record.revision === 0) {
+        // 新建未同步记录删除后 outbox 已撤销，通知同步层重算横幅「待同步 N 条」（TE04-11）
+        requestSync()
         return { status: 'synced' }
       }
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
