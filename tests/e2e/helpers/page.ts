@@ -48,13 +48,12 @@ export async function apiContextForDevice(deviceId: string): Promise<APIRequestC
 
 /**
  * 已知的网络噪音（不是应用异常）：
- * - 首次 GET /babies 在设备注册前返回 409 DEVICE_NOT_REGISTERED（契约 §5.4 的正常流程）；
- * - 前端未提供 favicon，Chrome 自动请求 /favicon.ico 得到 404（TE-04 缺陷 FE-01）。
+ * - 首次 GET /babies 在设备注册前返回 409 DEVICE_NOT_REGISTERED（契约 §5.4 的正常流程）。
  * 逐条说明，避免笼统豁免所有 console.error。
+ * favicon 404 已由 FE-02 修复，不再豁免；若复现即视为回归。
  */
 export const KNOWN_NETWORK_ERRORS: readonly RegExp[] = [
   /Failed to load resource: the server responded with a status of 409 \(Conflict\).*\/api\/v1\/babies/,
-  /Failed to load resource: the server responded with a status of 404 \(Not Found\).*\/favicon\.ico/,
 ];
 
 /** 收集控制台 error 与未捕获异常；资源加载失败带上来源 URL 以便精确豁免。 */
