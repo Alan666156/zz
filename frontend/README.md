@@ -90,7 +90,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | 离线（`navigator.onLine === false`） | `当前网络不可用，页面尚未加载，请恢复网络后重试` |
 | 其他/无法判断 | `页面加载失败，请检查网络后重试` |
 
-对话框 `data-testid="route-load-error"`，重试按钮 `route-load-retry`，取消按钮 `route-load-cancel`。失败后当前路由不变，禁止自动重试；重试只由用户点击触发，再次失败继续弹同一对话框。`router.push/replace` 的 reject 与 `router.onError` 会同时收到同一次失败，按「对话框已展示且目标相同」去重，只更新离线文案；重试使用 `router.replace` 回到原目标，重试期间「重试」「取消」均禁用，避免并发导航。
+对话框 `data-testid="route-load-error"`，重试按钮 `route-load-retry`，取消按钮 `route-load-cancel`。失败后当前路由不变，禁止自动重试；重试只由用户点击触发，再次失败继续弹同一对话框。`router.push/replace` 的 reject 与 `router.onError` 会同时收到同一次失败，按「对话框已展示且目标相同」去重，只更新离线文案；重试先 `router.replace` 回原目标，若仍失败且在线则整页跳转目标地址，绕过 Chromium 对失败动态 import/CSS 预加载的负缓存；重试期间「重试」「取消」均禁用，避免并发导航。识别范围同时覆盖 CSS 预加载失败（`Unable to preload CSS for ...`）。
 
 ### 导出（FE-07 / Q-16）
 
@@ -323,7 +323,7 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 86.8 KB |
+| 首屏 JS | ≤ 200 KB gzip | 86.9 KB |
 | 首屏 CSS | ≤ 50 KB gzip | 33.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 

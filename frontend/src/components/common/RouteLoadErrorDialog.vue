@@ -8,7 +8,7 @@ import {
   ROUTE_LOAD_ERROR_RETRY,
   ROUTE_LOAD_ERROR_TITLE,
 } from '@/constants/copy'
-import { navigateSafely } from '@/router/route-load-error'
+import { retryRouteNavigation } from '@/router/route-load-error'
 import { useUiStore } from '@/stores/ui'
 
 const router = useRouter()
@@ -31,8 +31,8 @@ async function retry(): Promise<void> {
   if (!target || retrying.value) return
   retrying.value = true
   try {
-    // 用 replace 重试，避免失败导航在历史栈留下重复条目；失败时对话框保持展示
-    const navigated = await navigateSafely(router, target, { replace: true })
+    // 用 replace 重试，避免失败导航在历史栈留下重复条目；仍失败时在线走整页跳转
+    const navigated = await retryRouteNavigation(router, target)
     if (navigated) ui.dismissRouteLoadError()
   } catch (error) {
     // 非 chunk 异常交给全局错误处理，不作为本对话框的失败
