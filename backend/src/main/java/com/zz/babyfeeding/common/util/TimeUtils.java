@@ -26,6 +26,11 @@ public final class TimeUtils {
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 
+    /** Current UTC wall-clock as a LocalDateTime, millisecond precision. */
+    public static LocalDateTime nowUtcLocal() {
+        return LocalDateTime.now(UTC).truncatedTo(ChronoUnit.MILLIS);
+    }
+
     /** Always formatted as an ISO-8601 UTC timestamp with millisecond precision. */
     public static String serverTime() {
         return SERVER_TIME_FORMAT.format(Instant.now());

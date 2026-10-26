@@ -21,8 +21,7 @@ repositories {
 
 sourceSets {
     integrationTest {
-        java.srcDir 'src/integrationTest/java'
-        resources.srcDir 'src/integrationTest/resources'
+        // Default source dirs are src/integrationTest/java and .../resources.
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }

@@ -64,6 +64,32 @@ curl -s http://127.0.0.1:8080/api/v1/health
 Returns HTTP 200 with `data.status=UP` when MySQL and Redis respond, otherwise
 HTTP 503 with `code=SERVICE_UNAVAILABLE` and a type-only error summary.
 
+## Implemented endpoints
+
+All responses use `{code,message,data,requestId,serverTime}`. Every endpoint
+except health and device init requires a valid `X-Device-Id` UUID v4 header that
+has been registered through init.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/health` | DB + Redis status; 503 when a dependency is down |
+| POST | `/api/v1/devices/init` | Idempotent; stores only the HMAC digest; 10/hour/IP |
+| GET | `/api/v1/babies` | Default baby first, then creation order |
+| POST | `/api/v1/babies` | Optional client `id` makes retries idempotent; max 5 active |
+| GET | `/api/v1/babies/{id}` | Cross-device access returns 404 |
+| PATCH | `/api/v1/babies/{id}` | Requires `baseRevision`; stale revision returns 409 with `data.current` |
+| DELETE | `/api/v1/babies/{id}?baseRevision=n` | Soft delete; cascades to feeding/growth; deleting the default promotes the earliest remaining baby |
+
+Business rules enforced by the baby API:
+
+- The first active baby becomes the default automatically; switching the default
+  clears the previous one atomically under a per-device row lock.
+- The current default cannot be unset (`DEFAULT_BABY_REQUIRED`).
+- Soft-deleted records are retained; repeating DELETE returns
+  `alreadyDeleted=true` instead of an error.
+- Rate limits (Redis fixed window): api 120/min/device, init 10/hour/IP.
+  Rejections return 429 with `Retry-After`.
+
 ## Database migrations
 
 Flyway runs automatically on startup (`spring.flyway.locations=classpath:db/migration`).
