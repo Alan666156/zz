@@ -305,6 +305,7 @@ export const useFeedingStore = defineStore('feeding', {
       await this.refreshPendingCount()
 
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        requestSync()
         return { status: 'pending', record: updated, message: '离线，修改待同步' }
       }
 
@@ -380,6 +381,7 @@ export const useFeedingStore = defineStore('feeding', {
         return { status: 'synced' }
       }
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        requestSync()
         return { status: 'pending', message: '离线，删除待同步' }
       }
 

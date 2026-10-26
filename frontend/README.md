@@ -107,7 +107,8 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 ### 触发点与退避
 
-- 触发：应用启动、`online` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入遇到可重试错误后的 `requestSync()`。
+- 触发：应用启动、`online` / `offline` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入（含离线写入）与可重试错误后的 `requestSync()`。
+- 离线计数：`runSync()` 先执行 `refreshPending()`（只读 IndexedDB，不发请求）再判断在线状态，离线新增/编辑/删除后横幅「待同步 N 条」立即更新；离线不进入 `syncNow()`。
 - 批量：`POST /api/v1/sync/push`，每批 1–50 条，`BABY` 优先、同类型按 `createdAt` 升序。
 - 批次幂等：每次**新尝试**生成新 `batchId`；网络/5xx/429 失败后把 `{batchId, keys, fingerprint}` 存入 IndexedDB `meta` 的 `sync.batchPlan`，下一轮内容未变时复用同一 `batchId` 与同一批记录重试，命中服务端 24h 缓存（`replayed:true`）。内容被编辑/删除/新增，或已收到服务端结果，则丢弃计划并生成新 `batchId`。
 - 退避：1s / 2s / 5s / 15s / 60s / 5min，±20% 抖动；429/409 优先遵守 `Retry-After`。
