@@ -83,8 +83,9 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | 数据过大（`EXPORT_TOO_LARGE` 且无 rowCount 时） | `导出数据过多，请缩小日期范围后重试。` |
 | 数据过大且返回 rowCount/maxRows | `导出数据过多（{rowCount} 行，最多 {maxRows} 行），请缩小日期范围。` |
 | 剪贴板不可用 | `当前环境无法自动复制，请长按链接手动复制。` |
+| 签名链接已过期（`expiresAt` 已到，点击重新下载/复制链接时） | `下载链接已过期，请重新导出。` |
 
-说明：下载由浏览器导航/新窗口完成，前端**无法感知**下载是否真正开始，因此兜底提示在每次生成成功后都显示，供用户手动复制链接。
+说明：下载由浏览器导航/新窗口完成，前端**无法感知**下载是否真正开始，因此兜底提示在每次生成成功后都显示，供用户手动复制链接。签名链接 TTL 由服务端 `expiresAt` 决定（Q-16，300 秒）；前端只在本页内阻止过期链接再次触发下载或复制，用户把链接粘贴到浏览器后由服务端返回 `EXPORT_TOKEN_EXPIRED` / `EXPORT_TOKEN_INVALID`。
 
 ## 离线与同步（FE-08）
 
@@ -100,6 +101,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 
 - 触发：应用启动、`online` 事件、`visibilitychange`（页面重新可见）、30 秒定时（仅当待同步数 > 失败数时）、本地写入遇到可重试错误后的 `requestSync()`。
 - 批量：`POST /api/v1/sync/push`，每批 1–50 条，`BABY` 优先、同类型按 `createdAt` 升序。
+- 批次幂等：每次**新尝试**生成新 `batchId`；网络/5xx/429 失败后把 `{batchId, keys, fingerprint}` 存入 IndexedDB `meta` 的 `sync.batchPlan`，下一轮内容未变时复用同一 `batchId` 与同一批记录重试，命中服务端 24h 缓存（`replayed:true`）。内容被编辑/删除/新增，或已收到服务端结果，则丢弃计划并生成新 `batchId`。
 - 退避：1s / 2s / 5s / 15s / 60s / 5min，±20% 抖动；429/409 优先遵守 `Retry-After`。
 - 结果处理：
   - `APPLIED` / `DUPLICATE` / `CONFLICT_SERVER_WINS`：按服务端返回记录覆盖本地缓存与 Pinia，再清 outbox。
@@ -226,7 +228,8 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | `export-submit` | 生成导出链接按钮 |
 | `export-result` | 生成成功后的结果区根节点 |
 | `export-row-count` | 导出条数文案 |
-| `export-link` | 签名下载链接（`<a>`） |
+| `export-link` | 签名下载链接（只读 `<input>`，内容为绝对地址） |
+| `export-link-expired` | “下载链接已过期”提示（`expiresAt` 到达后显示） |
 | `export-download-again` | 再次下载按钮 |
 | `export-copy-link` | 复制链接按钮 |
 | `export-fallback-copy` | 固定兜底文案段落（始终显示于结果区） |
@@ -265,7 +268,7 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 83.2 KB |
+| 首屏 JS | ≤ 200 KB gzip | 83.5 KB |
 | 首屏 CSS | ≤ 50 KB gzip | 32.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 
@@ -273,7 +276,8 @@ ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页
 
 ### 兼容性约束
 
-- 目标浏览器：iOS Safari ≥ 15、Android Chrome ≥ 100、微信 WebView（iOS/Android 近两年版本）。
+- 目标浏览器（契约 §5.7）：iOS 14+ Safari、Android 10+ Chrome/WebView、微信/支付宝内置浏览器。构建 target `es2018`。
+- 已排除 iOS 14 不支持的特性：不使用 `crypto.randomUUID()`（`utils/uuid.ts` 手写 v4，优先 `crypto.getRandomValues`）、`Array.prototype.at`、`structuredClone`、顶层 await、CSS `:has`（`grep` 复核为 0 命中）。
 - `navigator.locks` 缺失时自动降级到 `zz.bf.syncLock` 时间戳锁；`navigator.clipboard` 缺失时提示手动复制。
 - 导出下载使用 `<a target="_blank">` 导航，不使用 `URL.createObjectURL`（微信/iOS WebView 对 blob 下载支持差）。
 - 不使用 `structuredClone`（WebView 版本覆盖不足），写入 IndexedDB 前统一 JSON 拷贝（`toPlain`）。
@@ -282,6 +286,27 @@ ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页
 
 ### 已知限制
 
+- 导出对象固定为当前选中宝宝；无当前宝宝时 `profile-export` 置灰。
+- 本版本无账号体系，因此页面不提供账号注销入口。
 - 导出下载是否真正开始无法在前端探测，成功响应后始终显示兜底文案。
 - 生长趋势图取最近 100 条生长记录，超出部分不参与绘图（记录列表仍完整分页）。
 - 在线单条接口（PATCH/DELETE/POST）与批量同步引擎并存：单条路径用于即时反馈，仅在遇到可重试错误时触发 `requestSync()` 交给批量引擎兜底。
+
+### 手测清单（本地无法真机验证，发版前必过）
+
+自动化已覆盖类型、Lint、单测、构建与包体；以下项依赖真机/真实 WebView，需人工执行：
+
+| # | 设备/环境 | 场景 | 预期 |
+| --- | --- | --- | --- |
+| 1 | iOS 14+ Safari | 首次打开 → 生成设备 ID → 创建宝宝 | 无报错；刷新后设备 ID/宝宝保留 |
+| 2 | iOS 14+ Safari | 快速记录 → 断网 → 恢复网络 | 记录先落本机；联网后自动同步，记录列表不重复 |
+| 3 | iOS 14+ Safari | 导出 CSV 并打开链接 | 触发下载或新窗口；微信内可复制链接到 Safari 打开 |
+| 4 | iOS 14+ Safari | 无痕模式打开 | 显示“无法持久保存设备 ID（可能是无痕模式）”提示 |
+| 5 | iOS 14+ Safari | 统计/生长页图表 | canvas 正常渲染，切换指标不报错 |
+| 6 | Android 10 Chrome | 同上 1–5 | 同上 |
+| 7 | Android 10 WebView（微信） | 导出下载 | 未自动下载时显示兜底文案，复制链接可下载 |
+| 8 | Android 10 WebView（微信/支付宝） | 日期选择、数字键盘输入 | 原生 `input[type=date]`/`inputmode` 可用 |
+| 9 | 任意桌面 Chromium | 两个标签页同时在线同步 | 只有一方推送（`zz.bf.syncLock`/`navigator.locks`），无重复记录 |
+| 10 | 任意桌面 Chromium | 服务端返回 REJECTED（如宝宝已删除） | 本地保留记录、标记同步失败，不自动重试 |
+| 11 | 任意桌面 Chromium | 签名链接放置 5 分钟后点“重新下载” | 显示“下载链接已过期，请重新导出。” |
+| 12 | 任意桌面 Chromium | 控制台 | 全流程无 error/warn（`grep console.*` 为 0 已静态复核） |
