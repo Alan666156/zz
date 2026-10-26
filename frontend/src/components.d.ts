@@ -28,6 +28,7 @@ declare module 'vue' {
     SolidSheet: typeof import('./components/record/SolidSheet.vue')['default']
     TabbarLayout: typeof import('./components/layout/TabbarLayout.vue')['default']
     TagSelector: typeof import('./components/record/TagSelector.vue')['default']
+    TrendChart: typeof import('./components/chart/TrendChart.vue')['default']
     VanActionSheet: typeof import('vant/es')['ActionSheet']
     VanButton: typeof import('vant/es')['Button']
     VanCalendar: typeof import('vant/es')['Calendar']

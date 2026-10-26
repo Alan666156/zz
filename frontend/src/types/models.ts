@@ -71,6 +71,17 @@ export interface GrowthRecord {
   deletedAt: string | null
 }
 
+export interface GrowthRecordInput {
+  id?: string
+  measuredOn: string
+  heightCm?: number | null
+  weightKg?: number | null
+  headCircumferenceCm?: number | null
+  note?: string | null
+}
+
+export type GrowthMetric = 'height' | 'weight' | 'head'
+
 export interface DailySummary {
   feedingCount: number
   byType: Record<FeedingType, number>
@@ -81,6 +92,41 @@ export interface DailySummary {
   avgAmountMl: number | null
   lastFeedingAt: string | null
 }
+
+export interface DailyStats {
+  babyId: string
+  date: string
+  feedingCount: number
+  byType: Record<FeedingType, number>
+  totalAmountMl: number
+  totalSolidG: number
+  totalBreastDurationSec: number
+  totalDurationSec: number
+  avgAmountMl: number | null
+  lastFeedingAt: string | null
+  cached: boolean
+}
+
+export interface TrendPoint {
+  date: string
+  feedingCount: number
+  totalAmountMl: number
+  totalSolidG: number
+  totalBreastDurationSec: number
+  totalDurationSec: number
+  avgDurationSec: number | null
+}
+
+export interface TrendResult {
+  babyId: string
+  from: string
+  to: string
+  granularity: 'DAY'
+  points: TrendPoint[]
+  cached: boolean
+}
+
+export type StatsMetric = 'count' | 'amount' | 'duration'
 
 export type SyncEntityType = 'BABY' | 'FEEDING_RECORD' | 'GROWTH_RECORD'
 export type SyncOp = 'UPSERT' | 'DELETE'
