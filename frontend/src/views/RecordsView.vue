@@ -78,6 +78,11 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
+function handleConfirmDelete(): void {
+  deleteVisible.value = false
+  void confirmDelete()
+}
+
 function handleOnline(): void {
   void loadPage()
 }
@@ -193,10 +198,30 @@ onBeforeUnmount(() => {
       title="删除记录"
       message="删除后无法恢复，确认删除这条喂养记录吗？"
       show-cancel-button
-      confirm-button-text="删除"
-      confirm-button-color="#ee0a24"
-      @confirm="confirmDelete"
-    />
+      @confirm="handleConfirmDelete"
+    >
+      <template #footer>
+        <div class="dialog-actions">
+          <van-button
+            class="dialog-actions__btn"
+            size="large"
+            data-testid="cancel-delete"
+            @click="deleteVisible = false"
+          >
+            取消
+          </van-button>
+          <van-button
+            class="dialog-actions__btn"
+            size="large"
+            type="danger"
+            data-testid="confirm-delete"
+            @click="handleConfirmDelete"
+          >
+            删除
+          </van-button>
+        </div>
+      </template>
+    </van-dialog>
   </div>
 </template>
 
@@ -251,5 +276,16 @@ onBeforeUnmount(() => {
   margin: 10px 0 0;
   font-size: 11px;
   text-align: center;
+}
+
+/* 自定义 footer 才能给删除按钮挂 testid，Vant 默认按钮无 attrs 入口 */
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
+.dialog-actions__btn {
+  flex: 1;
 }
 </style>

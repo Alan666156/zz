@@ -149,6 +149,12 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | `breast-timer-display` | 计时数字 `mm:ss` |
 | `breast-timer-toggle` | 计时开始/暂停按钮 |
 | `breast-timer-finish` | 计时结束并保存按钮 |
+| `breast-side-group` | 母乳侧别按钮组 |
+| `breast-side-left` / `breast-side-right` / `breast-side-both` | 侧别按钮（左 / 右 / 双侧） |
+| `summary-feed-count` | 今日摘要-喂养次数 |
+| `summary-total-amount` | 今日摘要-奶量 (ml) |
+| `summary-total-duration` | 今日摘要-总时长（`totalDurationSec` 格式化） |
+| `summary-avg-duration` | 今日摘要-每次时长（`totalDurationSec / feedingCount` 派生，次数为 0 时为 `0 分钟`） |
 | `formula-amount-input` | 配方奶量原生 input |
 | `solid-amount-input` | 辅食量原生 input |
 | `feeding-tag-{spit_up\|refused\|sleepy\|hiccup\|other}` | 喂养标签 |
@@ -195,6 +201,7 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | `growth-page` | 生长页根节点 |
 | `growth-add` / `growth-add-inline` | 新增记录入口 |
 | `growth-latest` | 最新指标卡 |
+| `growth-latest-date` | 最新记录的测量日期（`YYYY-MM-DD`，仅日期，无“测量于”前缀；无记录时不渲染） |
 | `growth-latest-height` / `growth-latest-weight` / `growth-latest-head` | 最新身高/体重/头围（如 `68.5 cm`、`8.5 kg`、`43.0 cm`） |
 | `growth-metric-height` / `growth-metric-weight` / `growth-metric-head` | 三个趋势指标 tab |
 | `growth-chart` | 趋势图组件根节点 |
@@ -243,6 +250,15 @@ E2E 与排障请只依赖 `zz.bf.*`。
 | `export-copy-link` | 复制链接按钮 |
 | `export-fallback-copy` | 固定兜底文案段落（始终显示于结果区） |
 
+### 删除确认弹窗（记录 / 生长 / 宝宝共用）
+
+Vant Dialog 的默认确认按钮不暴露 attrs，因此三个删除弹窗都使用 `footer` 插槽自定义按钮，弹层关闭后 DOM 仍保留，testid 只需在**同一弹窗内**唯一。
+
+| testid | 元素 |
+| --- | --- |
+| `cancel-delete` | 取消按钮（关闭弹窗） |
+| `confirm-delete` | 删除按钮（关闭弹窗并执行删除） |
+
 同步锁 `zz.bf.syncLock` 不对外暴露 testid。
 
 ## E2E 选择器示例
@@ -277,7 +293,7 @@ await expect(page.getByTestId('export-fallback-copy')).toHaveText(
 
 | 资源 | 预算 | 最近一次实测 |
 | --- | --- | --- |
-| 首屏 JS | ≤ 200 KB gzip | 83.6 KB |
+| 首屏 JS | ≤ 200 KB gzip | 84.4 KB |
 | 首屏 CSS | ≤ 50 KB gzip | 32.1 KB |
 | ECharts 分包（`charts-*.js`） | ≤ 250 KB gzip | 82.2 KB |
 

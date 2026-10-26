@@ -94,6 +94,11 @@ async function confirmDelete(): Promise<void> {
     deleteTarget.value = null
   }
 }
+
+function handleConfirmDelete(): void {
+  deleteVisible.value = false
+  void confirmDelete()
+}
 </script>
 
 <template>
@@ -263,10 +268,30 @@ async function confirmDelete(): Promise<void> {
       title="删除宝宝"
       message="删除后，该宝宝的喂养与生长记录也会一并删除，且无法恢复。"
       show-cancel-button
-      confirm-button-text="删除"
-      confirm-button-color="#ee0a24"
-      @confirm="confirmDelete"
-    />
+      @confirm="handleConfirmDelete"
+    >
+      <template #footer>
+        <div class="dialog-actions">
+          <van-button
+            class="dialog-actions__btn"
+            size="large"
+            data-testid="cancel-delete"
+            @click="deleteVisible = false"
+          >
+            取消
+          </van-button>
+          <van-button
+            class="dialog-actions__btn"
+            size="large"
+            type="danger"
+            data-testid="confirm-delete"
+            @click="handleConfirmDelete"
+          >
+            删除
+          </van-button>
+        </div>
+      </template>
+    </van-dialog>
   </div>
 </template>
 
@@ -371,5 +396,16 @@ async function confirmDelete(): Promise<void> {
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 自定义 footer 才能给删除按钮挂 testid，Vant 默认按钮无 attrs 入口 */
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
+.dialog-actions__btn {
+  flex: 1;
 }
 </style>

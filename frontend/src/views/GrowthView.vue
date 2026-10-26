@@ -88,6 +88,11 @@ async function confirmDelete(): Promise<void> {
     deleteTarget.value = null
   }
 }
+
+function handleConfirmDelete(): void {
+  deleteVisible.value = false
+  void confirmDelete()
+}
 </script>
 
 <template>
@@ -121,7 +126,10 @@ async function confirmDelete(): Promise<void> {
       <div class="growth__latest-head">
         <span class="growth__latest-title">最新记录</span>
         <span class="growth__latest-date text-secondary">
-          {{ latestDate ? `测量于 ${latestDate}` : '还没有测量记录' }}
+          <template v-if="latestDate">
+            测量于 <span data-testid="growth-latest-date">{{ latestDate }}</span>
+          </template>
+          <template v-else>还没有测量记录</template>
         </span>
       </div>
       <div class="growth__latest-grid">
@@ -259,10 +267,30 @@ async function confirmDelete(): Promise<void> {
       title="删除生长记录"
       message="删除后无法恢复，确定删除这条生长记录吗？"
       show-cancel-button
-      confirm-button-text="删除"
-      confirm-button-color="#ee0a24"
-      @confirm="confirmDelete"
-    />
+      @confirm="handleConfirmDelete"
+    >
+      <template #footer>
+        <div class="dialog-actions">
+          <van-button
+            class="dialog-actions__btn"
+            size="large"
+            data-testid="cancel-delete"
+            @click="deleteVisible = false"
+          >
+            取消
+          </van-button>
+          <van-button
+            class="dialog-actions__btn"
+            size="large"
+            type="danger"
+            data-testid="confirm-delete"
+            @click="handleConfirmDelete"
+          >
+            删除
+          </van-button>
+        </div>
+      </template>
+    </van-dialog>
   </div>
 </template>
 
@@ -473,5 +501,16 @@ async function confirmDelete(): Promise<void> {
   margin: 7px 0 0;
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* 自定义 footer 才能给删除按钮挂 testid，Vant 默认按钮无 attrs 入口 */
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
+.dialog-actions__btn {
+  flex: 1;
 }
 </style>

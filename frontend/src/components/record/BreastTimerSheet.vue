@@ -142,13 +142,20 @@ onBeforeUnmount(clearTicker)
 
 <template>
   <div class="timer">
-    <div v-if="showSide" class="timer__sides" role="group" aria-label="母乳侧别">
+    <div
+      v-if="showSide"
+      class="timer__sides"
+      role="group"
+      aria-label="母乳侧别"
+      data-testid="breast-side-group"
+    >
       <button
         v-for="option in sides"
         :key="option.value"
         type="button"
         class="timer__side"
         :class="{ 'timer__side--active': option.value === side }"
+        :data-testid="`breast-side-${option.value.toLowerCase()}`"
         @click="emit('update:side', option.value)"
       >
         {{ option.label }}

@@ -19,6 +19,17 @@ const lastFeedingText = computed(() => {
 const breastDurationText = computed(
   () => formatDuration(props.summary.totalBreastDurationSec) || '0 分钟',
 )
+
+const totalDurationText = computed(
+  () => formatDuration(props.summary.totalDurationSec) || '0 分钟',
+)
+
+// 契约未下发 avgDurationSec，按「总时长 / 喂养次数」派生
+const avgDurationText = computed(() => {
+  const count = props.summary.feedingCount
+  if (count <= 0) return '0 分钟'
+  return formatDuration(Math.round(props.summary.totalDurationSec / count)) || '0 分钟'
+})
 </script>
 
 <template>
@@ -30,11 +41,13 @@ const breastDurationText = computed(
 
     <div class="summary__grid">
       <div class="summary__item">
-        <span class="summary__value">{{ summary.feedingCount }}</span>
+        <span class="summary__value" data-testid="summary-feed-count">{{ summary.feedingCount }}</span>
         <span class="summary__label">喂养次数</span>
       </div>
       <div class="summary__item">
-        <span class="summary__value">{{ summary.totalAmountMl }}</span>
+        <span class="summary__value" data-testid="summary-total-amount">
+          {{ summary.totalAmountMl }}
+        </span>
         <span class="summary__label">奶量 (ml)</span>
       </div>
       <div class="summary__item">
@@ -44,6 +57,24 @@ const breastDurationText = computed(
       <div class="summary__item">
         <span class="summary__value summary__value--text">{{ breastDurationText }}</span>
         <span class="summary__label">母乳时长</span>
+      </div>
+      <div class="summary__item">
+        <span
+          class="summary__value summary__value--text"
+          data-testid="summary-total-duration"
+        >
+          {{ totalDurationText }}
+        </span>
+        <span class="summary__label">总时长</span>
+      </div>
+      <div class="summary__item">
+        <span
+          class="summary__value summary__value--text"
+          data-testid="summary-avg-duration"
+        >
+          {{ avgDurationText }}
+        </span>
+        <span class="summary__label">每次时长</span>
       </div>
     </div>
   </section>
@@ -69,7 +100,7 @@ const breastDurationText = computed(
 
 .summary__grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
 
