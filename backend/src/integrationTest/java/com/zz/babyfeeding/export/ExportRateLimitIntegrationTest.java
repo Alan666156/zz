@@ -84,4 +84,51 @@ class ExportRateLimitIntegrationTest extends IntegrationTestBase {
         // Full quota is checked before business validation: invalid body is 429.
         assertError(postJson(EXPORT_PATH, deviceId, invalid), 429, "RATE_LIMITED");
     }
+
+    /**
+     * N-7: Spring's handler mapping ignores ";matrix" content, so the export
+     * handler is reached for "…/feeding-records;a=1". Matching the raw request
+     * URI would skip the export quota and fall back to the 120/min api limit.
+     */
+    @Test
+    void matrixParametersDoNotBypassTheExportQuota() throws Exception {
+        String deviceId = newDeviceId();
+        initDeviceOk(deviceId);
+        String babyId = createBaby(deviceId, "小满", true).path("id").asText();
+        String matrixPath = EXPORT_PATH + ";a=1";
+
+        Map<String, Object> invalid = new LinkedHashMap<>();
+        invalid.put("babyId", babyId);
+        invalid.put("from", "2026-10-21");
+        invalid.put("to", "2026-10-20");
+
+        // Rejections roll back: the export limit is visible and unchanged.
+        for (int attempt = 0; attempt < 5; attempt++) {
+            MvcResult rejected = postJson(matrixPath, deviceId, invalid);
+            assertError(rejected, 400, "VALIDATION_ERROR");
+            assertThat(rejected.getResponse().getHeader("X-RateLimit-Limit"))
+                    .as("matrix path must use the export limit, not the api limit")
+                    .isEqualTo("5");
+            assertThat(rejected.getResponse().getHeader("X-RateLimit-Remaining"))
+                    .as("matrix path failures must not consume quota")
+                    .isEqualTo("5");
+        }
+
+        // Matrix and plain paths share the same per-device export window.
+        int[] expectedRemaining = {4, 3, 2, 1, 0};
+        for (int index = 0; index < 5; index++) {
+            String path = index % 2 == 0 ? matrixPath : EXPORT_PATH;
+            MvcResult issued = postJson(path, deviceId, exportBody(babyId));
+            assertThat(issued.getResponse().getStatus()).isEqualTo(200);
+            assertThat(issued.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("5");
+            assertThat(issued.getResponse().getHeader("X-RateLimit-Remaining"))
+                    .isEqualTo(String.valueOf(expectedRemaining[index]));
+        }
+
+        MvcResult blocked = postJson(matrixPath, deviceId, exportBody(babyId));
+        assertError(blocked, 429, "RATE_LIMITED");
+        assertThat(body(blocked).path("data").path("scope").asText()).isEqualTo("export");
+        assertThat(blocked.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("0");
+        assertThat(blocked.getResponse().getHeader("Retry-After")).isNotNull();
+    }
 }
