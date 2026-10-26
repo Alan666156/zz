@@ -5,7 +5,6 @@ import com.zz.babyfeeding.common.web.DeviceContext;
 import com.zz.babyfeeding.export.dto.CreateExportRequest;
 import com.zz.babyfeeding.export.dto.ExportTicketResponse;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,8 +29,9 @@ public class ExportController {
     @PostMapping("/feeding-records")
     public ResponseEntity<ApiResponse<ExportTicketResponse>> create(
             @RequestBody(required = false) CreateExportRequest request) {
+        // Cache-Control is set once for every response by RequestIdFilter;
+        // repeating it here would append a second value ("no-store, no-store").
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.noStore())
                 .body(ApiResponse.ok(
                         exportService.createExport(DeviceContext.require(), request)));
     }
@@ -45,7 +45,6 @@ public class ExportController {
         response.setHeader(HttpHeaders.CONTENT_TYPE, "text/csv; charset=UTF-8");
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
                 "attachment; filename=\"" + download.filename() + "\"");
-        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         response.setHeader("X-Content-Type-Options", "nosniff");
         exportService.writeCsv(download, response.getOutputStream());
     }
