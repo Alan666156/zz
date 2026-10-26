@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.zz.babyfeeding.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import javax.crypto.Mac;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 /**
  * Executable EXP-01..EXP-12 acceptance cases (docs/tests §12). Each test starts
@@ -503,6 +505,76 @@ class ExportIntegrationTest extends IntegrationTestBase {
         String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 mac.doFinal(payloadPart.getBytes(StandardCharsets.US_ASCII)));
         return payloadPart + "." + signature;
+    }
+
+    // --------------------------------------------------------- FIX-BE-01/02
+
+    /**
+     * The CSV download accepts any request Accept (browsers send text/html,
+     * test clients text/csv). Errors must still be the contract JSON envelope,
+     * not HTTP 406/500.
+     */
+    @Test
+    void downloadErrorsAreJsonEvenWithCsvOrHtmlAccept() throws Exception {
+        String deviceId = newDeviceId();
+        String babyId = setupDeviceAndBaby(deviceId);
+        JsonNode ticket = requestExport(deviceId, babyId, DAY, DAY);
+        String token = tokenOf(ticket.path("downloadUrl").asText());
+
+        String payloadPart = token.substring(0, token.lastIndexOf('.'));
+        String signaturePart = token.substring(token.lastIndexOf('.') + 1);
+        char tamperedChar = signaturePart.charAt(0) == 'A' ? 'B' : 'A';
+        String tampered = payloadPart + "." + tamperedChar + signaturePart.substring(1);
+
+        MvcResult csvAccept = mockMvc.perform(get(DOWNLOAD_PREFIX + tampered + ".csv")
+                        .accept(MediaType.parseMediaType("text/csv")))
+                .andReturn();
+        assertError(csvAccept, 403, "EXPORT_TOKEN_INVALID");
+        assertJsonError(csvAccept);
+
+        String expired = signExpiredToken(deviceIdHasher.hashHex(deviceId), babyId);
+        MvcResult htmlAccept = mockMvc.perform(get(DOWNLOAD_PREFIX + expired + ".csv")
+                        .accept(MediaType.TEXT_HTML))
+                .andReturn();
+        assertError(htmlAccept, 410, "EXPORT_TOKEN_EXPIRED");
+        assertJsonError(htmlAccept);
+
+        // Token issued before the baby was deleted, downloaded with a
+        // browser-like Accept: still 404 + JSON.
+        assertThat(deleteJson("/api/v1/babies/" + babyId + "?baseRevision=1", deviceId)
+                .getResponse().getStatus()).isEqualTo(200);
+        MvcResult deleted = mockMvc.perform(get(DOWNLOAD_PREFIX + token + ".csv")
+                        .accept(MediaType.TEXT_HTML))
+                .andReturn();
+        assertError(deleted, 404, "NOT_FOUND");
+        assertJsonError(deleted);
+    }
+
+    @Test
+    void responsesCarryExactlyOneNoStoreCacheControl() throws Exception {
+        String deviceId = newDeviceId();
+        String babyId = setupDeviceAndBaby(deviceId);
+
+        MvcResult ticket = postJson("/api/v1/exports/feeding-records", deviceId,
+                payload("babyId", babyId, "from", DAY, "to", DAY));
+        assertThat(ticket.getResponse().getStatus()).isEqualTo(200);
+        assertThat(ticket.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(ticket.getResponse().getHeaders("Cache-Control"))
+                .containsExactly("no-store");
+
+        MvcResult file = download(body(ticket).path("data").path("downloadUrl").asText());
+        assertThat(file.getResponse().getStatus()).isEqualTo(200);
+        assertThat(file.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(file.getResponse().getHeaders("Cache-Control"))
+                .containsExactly("no-store");
+        assertThat(file.getResponse().getHeader("X-Content-Type-Options"))
+                .isEqualTo("nosniff");
+    }
+
+    private static void assertJsonError(MvcResult result) {
+        String contentType = result.getResponse().getHeader("Content-Type");
+        assertThat(contentType).startsWith("application/json");
+        assertThat(contentType).contains("charset=UTF-8");
     }
 
     @Test

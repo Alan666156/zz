@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
@@ -26,6 +27,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.nio.charset.StandardCharsets;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -40,6 +42,8 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final MediaType JSON_UTF8 =
+            new MediaType("application", "json", StandardCharsets.UTF_8);
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Object>> handleBusiness(
@@ -225,6 +229,11 @@ public class GlobalExceptionHandler {
             ErrorCode code, String message, Object data, HttpHeaders headers) {
         HttpStatus status = code.getStatus();
         ApiResponse<Object> body = ApiResponse.error(code, message, data);
+        // Errors are always JSON. Pinning the content type makes converter
+        // selection independent of the request Accept header, so a failed CSV
+        // download requested with Accept: text/csv (or text/html from a
+        // browser) stays a contract JSON error instead of 406 -> 500.
+        headers.setContentType(JSON_UTF8);
         return new ResponseEntity<>(body, headers, status);
     }
 
