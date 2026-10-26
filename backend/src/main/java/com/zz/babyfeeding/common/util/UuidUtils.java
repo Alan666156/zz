@@ -1,5 +1,7 @@
 package com.zz.babyfeeding.common.util;
 
+import com.zz.babyfeeding.common.api.ValidationExceptions;
+
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -35,5 +37,18 @@ public final class UuidUtils {
     /** Generates a lower-case canonical UUID v4. */
     public static String newUuidV4() {
         return UUID.randomUUID().toString();
+    }
+
+    /** Validates a body/path id and raises VALIDATION_ERROR with the field name. */
+    public static String requireUuidV4(String field, String value) {
+        if (!isUuidV4(value)) {
+            throw ValidationExceptions.field(field, field + " 必须是 UUID v4");
+        }
+        return value;
+    }
+
+    /** Client-supplied id or a generated one when omitted. */
+    public static String uuidV4OrGenerate(String field, String value) {
+        return value == null ? newUuidV4() : requireUuidV4(field, value);
     }
 }

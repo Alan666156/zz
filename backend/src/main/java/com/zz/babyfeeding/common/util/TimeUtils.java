@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
 
 /**
@@ -18,6 +20,18 @@ public final class TimeUtils {
 
     private static final DateTimeFormatter SERVER_TIME_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(UTC);
+
+    /**
+     * Echoes record timestamps in their original offset, always with seconds,
+     * and with milliseconds only when they are non-zero.
+     */
+    private static final DateTimeFormatter OFFSET_FORMAT = new DateTimeFormatterBuilder()
+            .appendPattern("yyyy-MM-dd'T'HH:mm:ss")
+            .optionalStart()
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 3, true)
+            .optionalEnd()
+            .appendOffset("+HH:MM", "Z")
+            .toFormatter();
 
     private TimeUtils() {
     }
@@ -64,6 +78,11 @@ public final class TimeUtils {
     /** Converts a stored UTC LocalDateTime to the audit timestamp (UTC). */
     public static Instant utcToInstant(LocalDateTime utc) {
         return utc == null ? null : utc.toInstant(UTC);
+    }
+
+    /** Formats an offset-aware record timestamp for API responses. */
+    public static String formatOffset(OffsetDateTime value) {
+        return value == null ? null : OFFSET_FORMAT.format(value);
     }
 
     public static LocalDate parseDate(String value) {
