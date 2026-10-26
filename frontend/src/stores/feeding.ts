@@ -113,6 +113,8 @@ export const useFeedingStore = defineStore('feeding', {
     hasNext: false,
     loadSeq: 0,
     lastError: null as string | null,
+    /** 本机缓存写入失败：记录仅保留在 Pinia，刷新后可能丢失（FE-08） */
+    cacheDegraded: false,
   }),
 
   getters: {
@@ -138,6 +140,26 @@ export const useFeedingStore = defineStore('feeding', {
       } catch {
         this.pendingCount = await countOutbox('FEEDING_RECORD').catch(() => 0)
         this.pendingIds = []
+      }
+    },
+
+    /** 缓存写失败可降级为仅内存，但必须显式标记，不能静默吞掉（FE-08） */
+    async persistRecordCache(record: FeedingRecord): Promise<void> {
+      try {
+        await putFeedingRecordCache(record)
+        this.cacheDegraded = false
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机缓存不可用，记录仅在当前页面保留'
+      }
+    },
+
+    async dropRecordCache(id: string): Promise<void> {
+      try {
+        await deleteFeedingRecordCache(id)
+        this.cacheDegraded = false
+      } catch {
+        this.cacheDegraded = true
       }
     },
 
@@ -263,11 +285,7 @@ export const useFeedingStore = defineStore('feeding', {
       if (validationError) throw new Error(validationError)
 
       const record = buildLocalFeedingRecord(input, babyId)
-      try {
-        await putFeedingRecordCache(record)
-      } catch {
-        // IndexedDB 不可用时至少保证 Pinia 可用
-      }
+      await this.persistRecordCache(record)
       try {
         await enqueueOutbox({
           entityType: 'FEEDING_RECORD',
@@ -278,7 +296,10 @@ export const useFeedingStore = defineStore('feeding', {
           babyId: record.babyId,
         })
       } catch {
-        // 离线队列写入失败时仍展示记录，lastError 会在同步阶段提示
+        // 队列写不进去 = 无法保证刷新后仍在，必须回滚并让调用方提示保存失败（FE-08）
+        await deleteFeedingRecordCache(record.id).catch(() => undefined)
+        this.cacheDegraded = true
+        throw new Error('保存失败，请检查浏览器存储空间后重试')
       }
 
       if (record.babyId === this.currentBabyId && record.recordDate === this.currentDate) {
@@ -300,11 +321,7 @@ export const useFeedingStore = defineStore('feeding', {
       if (validationError) throw new Error(validationError)
 
       const updated = buildUpdatedRecord(record, input)
-      try {
-        await putFeedingRecordCache(updated)
-      } catch {
-        // 缓存失败不影响 Pinia 展示
-      }
+      await this.persistRecordCache(updated)
       try {
         await enqueueOutbox({
           entityType: 'FEEDING_RECORD',
@@ -315,7 +332,11 @@ export const useFeedingStore = defineStore('feeding', {
           babyId: updated.babyId,
         })
       } catch {
-        // 队列失败时至少保留本地修改
+        // 回滚缓存与 Pinia，不能让用户以为修改已保存（FE-08）
+        await putFeedingRecordCache(record).catch(() => {
+          this.cacheDegraded = true
+        })
+        throw new Error('保存失败，请检查浏览器存储空间后重试')
       }
       this.mergeRecords([...this.records, updated])
       await this.refreshPendingCount()
@@ -375,11 +396,7 @@ export const useFeedingStore = defineStore('feeding', {
 
     /** 删除记录：本地立即隐藏；已同步记录带 baseRevision 通知服务端 */
     async deleteRecord(record: FeedingRecord): Promise<FeedingMutationOutcome> {
-      try {
-        await deleteFeedingRecordCache(record.id)
-      } catch {
-        // 缓存删除失败时仍从 Pinia 移除
-      }
+      await this.dropRecordCache(record.id)
       this.records = this.records.filter((item) => item.id !== record.id)
       try {
         await enqueueOutbox({
@@ -390,7 +407,13 @@ export const useFeedingStore = defineStore('feeding', {
           babyId: record.babyId,
         })
       } catch {
-        // 队列失败时本地仍视为已删除
+        // 回滚缓存与 Pinia，删除没有进入队列就不能假装成功（FE-08）
+        await putFeedingRecordCache(record).catch(() => {
+          this.cacheDegraded = true
+        })
+        this.mergeRecords([...this.records, record])
+        await this.refreshPendingCount()
+        throw new Error('删除失败，请检查浏览器存储空间后重试')
       }
       await this.refreshPendingCount()
 

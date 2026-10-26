@@ -81,6 +81,8 @@ export const useBabyStore = defineStore('baby', {
     loading: false,
     refreshing: false,
     lastError: null as string | null,
+    /** 本机缓存写入失败：数据仅保留在 Pinia，刷新后可能丢失（FE-08） */
+    cacheDegraded: false,
   }),
 
   getters: {
@@ -123,6 +125,17 @@ export const useBabyStore = defineStore('baby', {
     setList(list: Baby[]): void {
       this.babies = sortBabies(list)
       this.ensureActive()
+    },
+
+    /** 缓存写失败不再向外抛（会打断已成功的在线操作），但必须显式标记（FE-08） */
+    async persistBabiesCache(): Promise<void> {
+      try {
+        await putBabiesCache(this.babies)
+        this.cacheDegraded = false
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机缓存写入失败，数据仅在当前页面保留'
+      }
     },
 
     upsertLocal(baby: Baby): void {
@@ -227,7 +240,7 @@ export const useBabyStore = defineStore('baby', {
 
       const snapshot = cloneBabies(this.babies)
       this.upsertLocal(localBaby)
-      await putBabiesCache(this.babies)
+      await this.persistBabiesCache()
 
       try {
         const result = await createBabyRequest({
@@ -238,9 +251,9 @@ export const useBabyStore = defineStore('baby', {
           isDefault: localBaby.isDefault,
         })
         this.upsertLocal(result.baby)
-        await putBabiesCache(this.babies)
         await removeOutbox(outboxKey('BABY', localBaby.id))
         this.lastError = null
+        await this.persistBabiesCache()
         return result.baby
       } catch (error) {
         if (!isRetryableApiError(error)) {
@@ -286,7 +299,7 @@ export const useBabyStore = defineStore('baby', {
 
       const snapshot = cloneBabies(this.babies)
       this.upsertLocal(updated)
-      await putBabiesCache(this.babies)
+      await this.persistBabiesCache()
 
       // 从未同步成功的宝宝：继续以 baseRevision=0 折叠在 outbox 中
       if (current.revision === 0) {
@@ -308,9 +321,9 @@ export const useBabyStore = defineStore('baby', {
         if (patch.isDefault !== undefined) payload.isDefault = updated.isDefault
         const serverBaby = await patchBabyRequest(id, payload)
         this.upsertLocal(serverBaby)
-        await putBabiesCache(this.babies)
         await removeOutbox(outboxKey('BABY', id))
         this.lastError = null
+        await this.persistBabiesCache()
         // 设为默认时服务端会同时递增旧默认宝宝的 revision，本地只有被 PATCH 的那条是新的；
         // 不重新拉取会导致之后编辑旧默认宝宝 409（FE-06）。
         if (patch.isDefault === true) await this.refreshFromServer()
@@ -365,7 +378,12 @@ export const useBabyStore = defineStore('baby', {
       await deleteGrowthRecordsByBaby(id)
       // 记录缓存已删，对应的 feeding/growth outbox 也必须清掉，否则联网后会被判 REJECTED（FE-07）
       await removeOutboxByBaby(id)
-      await replaceBabiesCache(this.babies)
+      try {
+        await replaceBabiesCache(this.babies)
+      } catch {
+        this.cacheDegraded = true
+        this.lastError = '本机缓存写入失败，数据仅在当前页面保留'
+      }
 
       const key = outboxKey('BABY', id)
       // 本地新建尚未同步：直接撤销，无需通知服务端
