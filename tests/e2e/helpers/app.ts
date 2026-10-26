@@ -477,9 +477,9 @@ export type TabName = 'home' | 'records' | 'stats' | 'growth' | 'profile';
 /**
  * 每个 Tab 的落地锚点。点击后必须等目标页真实渲染，避免离线/懒加载失败时
  * 仍停留在原页面却被误判为“已切换”（UI-16/TE04-10 的历史教训）。
- * FE-11 已补齐 `home-page` / `profile-page`，统一使用页面根节点。
+ * 优先使用页面根 testid；旧构建/旧 worktree 缺少根节点时退回页面内稳定节点。
  */
-const TAB_LANDING_TESTID: Record<TabName, string> = {
+const TAB_PAGE_ROOT: Record<TabName, string> = {
   home: 'home-page',
   records: 'records-page',
   stats: 'stats-page',
@@ -487,9 +487,21 @@ const TAB_LANDING_TESTID: Record<TabName, string> = {
   profile: 'profile-page',
 };
 
+const TAB_FALLBACK_ANCHOR: Record<TabName, string> = {
+  home: 'baby-card',
+  records: 'records-date-nav',
+  stats: 'stats-range-7',
+  growth: 'growth-add',
+  profile: 'profile-sync-status',
+};
+
 export async function openTab(page: Page, tab: TabName): Promise<void> {
   await page.getByTestId(`tabbar-${tab}`).click();
-  await expect(page.getByTestId(TAB_LANDING_TESTID[tab])).toBeVisible({ timeout: 15_000 });
+  try {
+    await expect(page.getByTestId(TAB_PAGE_ROOT[tab])).toBeVisible({ timeout: 5_000 });
+  } catch {
+    await expect(page.getByTestId(TAB_FALLBACK_ANCHOR[tab])).toBeVisible({ timeout: 15_000 });
+  }
 }
 
 /** 打开记录页第一条记录的编辑弹窗。 */
