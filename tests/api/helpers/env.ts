@@ -42,3 +42,50 @@ export const EXPORT_TOKEN_TTL_SECONDS = 300;
 
 /** Redis key 前缀；测试与后端必须一致（addendum §5）。 */
 export const REDIS_KEY_PREFIX = process.env.APP_REDIS_KEY_PREFIX ?? 'zz:bf:v1:';
+
+/**
+ * Redis 连接（仅 DB14）。SYNC-16 / STATS-06 / 限流用例通过 redis-cli 直接操作；
+ * 密码只从环境变量读取，不写入仓库。
+ */
+export const REDIS_HOST = process.env.REDIS_HOST ?? '127.0.0.1';
+export const REDIS_PORT = process.env.REDIS_PORT ?? '6379';
+export const REDIS_DATABASE = Number(process.env.REDIS_DATABASE ?? '14');
+export const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
+
+/**
+ * MySQL 连接（仅 zz_e2e）。DEV-06、BABY-17、TZ-02/03、EXP-12 等需要直接读写数据库。
+ */
+export const DB_HOST = process.env.DB_HOST ?? '127.0.0.1';
+export const DB_PORT = process.env.DB_PORT ?? '3306';
+export const DB_USER = process.env.DB_USER ?? 'root';
+export const DB_PASSWORD = process.env.DB_PASSWORD;
+export const DB_NAME = process.env.DB_NAME ?? 'zz_e2e';
+
+/** 设备摘要密钥；DEV-06 / SYNC-16 / EXP-11 需要计算 device_uid_hash。 */
+export const APP_DEVICE_PEPPER = process.env.APP_DEVICE_PEPPER;
+
+/** UTC 今天的 YYYY-MM-DD。日期边界用例以服务端 UTC 日期为基准。 */
+export function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** 在 YYYY-MM-DD 上加减天数（UTC 日历）。 */
+export function addDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+/** 在 YYYY-MM-DD 上加减年（按实际日历，闰日自然处理）。 */
+export function addYears(date: string, years: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCFullYear(value.getUTCFullYear() + years);
+  return value.toISOString().slice(0, 10);
+}
+
+/** 两个 YYYY-MM-DD 的闭区间天数（含首尾）。 */
+export function daySpan(from: string, to: string): number {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  return Math.round((end - start) / 86_400_000) + 1;
+}

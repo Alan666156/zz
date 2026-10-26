@@ -127,7 +127,7 @@ export async function newDeviceClient(
 /** 未初始化的设备客户端（用于 DEV-04 等）。 */
 export function newAnonymousClient(
   request: APIRequestContext,
-  deviceId = randomUUID(),
+  deviceId: string = randomUUID(),
 ): ApiClient {
   return new ApiClient(request, deviceId);
 }
