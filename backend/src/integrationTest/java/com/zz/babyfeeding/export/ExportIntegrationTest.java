@@ -411,12 +411,42 @@ class ExportIntegrationTest extends IntegrationTestBase {
                 payload("babyId", babyId),
                 payload("babyId", babyId, "from", "2026-10-21", "to", DAY),
                 payload("babyId", babyId, "from", "2026/10/20", "to", DAY),
-                payload("babyId", babyId, "from", "2025-10-19", "to", "2026-10-20"));
+                // Q-27: a 367-day span is a resource limit (413), not a 400.
+                payload("babyId", babyId, "from", DAY));
 
         for (Map<String, Object> body : invalid) {
             assertError(postJson("/api/v1/exports/feeding-records", deviceId, body),
                     400, "VALIDATION_ERROR");
         }
+    }
+
+    @Test
+    void rejectsSpanOver366DaysAsExportTooLarge() throws Exception {
+        String deviceId = newDeviceId();
+        String babyId = setupDeviceAndBaby(deviceId);
+
+        MvcResult tooLarge = postJson("/api/v1/exports/feeding-records", deviceId,
+                payload("babyId", babyId, "from", "2025-10-19", "to", "2026-10-20"));
+
+        assertError(tooLarge, 413, "EXPORT_TOO_LARGE");
+        JsonNode data = body(tooLarge).path("data");
+        assertThat(data.path("maxDays").asInt()).isEqualTo(366);
+        assertThat(data.path("from").asText()).isEqualTo("2025-10-19");
+        assertThat(data.path("to").asText()).isEqualTo("2026-10-20");
+        assertThat(data.path("spanDays").asInt()).isEqualTo(367);
+        // Span is checked before the row count: only the span variant is sent.
+        assertThat(data.has("rowCount")).isFalse();
+        assertThat(data.has("maxRows")).isFalse();
+
+        // Q-20: the reservation was rolled back, so the quota is untouched.
+        assertThat(tooLarge.getResponse().getHeader("X-RateLimit-Limit")).isEqualTo("5");
+        assertThat(tooLarge.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("5");
+        assertThat(tooLarge.getResponse().getHeader("Retry-After")).isNull();
+
+        MvcResult issued = postJson("/api/v1/exports/feeding-records", deviceId,
+                payload("babyId", babyId, "from", DAY, "to", DAY));
+        assertThat(issued.getResponse().getStatus()).isEqualTo(200);
+        assertThat(issued.getResponse().getHeader("X-RateLimit-Remaining")).isEqualTo("4");
     }
 
     @Test

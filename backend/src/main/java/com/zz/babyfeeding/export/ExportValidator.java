@@ -1,10 +1,14 @@
 package com.zz.babyfeeding.export;
 
+import com.zz.babyfeeding.common.api.BusinessException;
+import com.zz.babyfeeding.common.api.ErrorCode;
 import com.zz.babyfeeding.common.api.ValidationExceptions;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** Export request rules (contract 4.9): strict dates, ordered 366-day window. */
 public final class ExportValidator {
@@ -32,7 +36,15 @@ public final class ExportValidator {
         }
         long spanDays = ChronoUnit.DAYS.between(from, to) + 1;
         if (spanDays > MAX_RANGE_DAYS) {
-            throw ValidationExceptions.field("from", "导出跨度不能超过 366 天");
+            // Q-27: span is an export resource limit, not a field format
+            // error. The row count is not queried yet, so the payload carries
+            // only the span variant of the EXPORT_TOO_LARGE data.
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("maxDays", MAX_RANGE_DAYS);
+            data.put("from", from.toString());
+            data.put("to", to.toString());
+            data.put("spanDays", spanDays);
+            throw new BusinessException(ErrorCode.EXPORT_TOO_LARGE, data);
         }
     }
 }
