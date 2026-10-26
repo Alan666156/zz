@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ApiError, isRetryableApiError } from '@/api/client'
 import { pushSyncBatch, type SyncChange, type SyncPushResult } from '@/api/sync'
+import { SYNC_CONFLICT_COPY } from '@/constants/copy'
 import {
   deleteMeta,
   getFeedingRecordCache,
@@ -356,7 +357,8 @@ export const useSyncStore = defineStore('sync', {
       if (!outcome) return emptyOutcome('busy', this.pendingCount)
 
       if (outcome.conflict > 0) {
-        useUiStore().toast(`${outcome.conflict} 条记录已在其他端更新`)
+        // UI-17 固定文案，不拼接条数
+        useUiStore().toast(SYNC_CONFLICT_COPY)
       } else if (outcome.rejected > 0) {
         useUiStore().toast(`${outcome.rejected} 条记录同步失败，请打开记录修改后重试`)
       }

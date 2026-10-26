@@ -39,3 +39,6 @@ export const EXPORT_TOO_LARGE_COPY = '导出数据过多，请缩小日期范围
 export const EXPORT_CLIPBOARD_UNAVAILABLE_COPY = '当前环境无法自动复制，请长按链接手动复制。'
 
 export const EXPORT_LINK_EXPIRED_COPY = '下载链接已过期，请重新导出。'
+
+/** UI-17 / 契约 §4.7 固定文案，不得改写 */
+export const SYNC_CONFLICT_COPY = '该记录已在其他端更新'
