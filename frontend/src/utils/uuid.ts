@@ -1,17 +1,15 @@
 /**
  * 手写 UUID v4：不依赖 crypto.randomUUID（iOS 14 / 旧 WebView 不支持）。
- * 优先 crypto.getRandomValues，缺失时退化为 Math.random。
+ * 只用 crypto.getRandomValues；缺失时抛错而不是降级 Math.random，
+ * 避免生成可预测 id（契约要求 122 bit 随机，FE-09）。
  */
 export function uuidV4(): string {
   const bytes = new Uint8Array(16)
   const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined
-  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
-    cryptoObj.getRandomValues(bytes)
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 256)
-    }
+  if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
+    throw new Error('当前浏览器不支持安全随机数，请升级浏览器或更换设备')
   }
+  cryptoObj.getRandomValues(bytes)
   // version 4
   bytes[6] = (bytes[6] & 0x0f) | 0x40
   // variant 10xx

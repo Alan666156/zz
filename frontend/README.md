@@ -311,7 +311,8 @@ ECharts 仅在统计页/生长页按需 `import()`，不进入首屏；每个页
 ### 兼容性约束
 
 - 目标浏览器（契约 §5.7）：iOS 14+ Safari、Android 10+ Chrome/WebView、微信/支付宝内置浏览器。构建 target `es2018`。
-- 已排除 iOS 14 不支持的特性：不使用 `crypto.randomUUID()`（`utils/uuid.ts` 手写 v4，优先 `crypto.getRandomValues`）、`Array.prototype.at`、`structuredClone`、顶层 await、CSS `:has`（`grep` 复核为 0 命中）。
+- 已排除 iOS 14 不支持的特性：不使用 `crypto.randomUUID()`（`utils/uuid.ts` 手写 v4，只用 `crypto.getRandomValues`）、`Array.prototype.at`、`structuredClone`、顶层 await、CSS `:has`（`grep` 复核为 0 命中）。
+- 安全随机数（FE-09）：`crypto.getRandomValues` 不可用时 `uuidV4()` 直接抛错（提示“当前浏览器不支持安全随机数”），不再降级 `Math.random`，避免生成可预测 id。
 - `navigator.locks` 缺失时自动降级到 `zz.bf.syncLock` 时间戳锁；`navigator.clipboard` 缺失时提示手动复制。
 - 导出下载使用 `<a target="_blank">` 导航，不使用 `URL.createObjectURL`（微信/iOS WebView 对 blob 下载支持差）。
 - 不使用 `structuredClone`（WebView 版本覆盖不足），写入 IndexedDB 前统一 JSON 拷贝（`toPlain`）。
