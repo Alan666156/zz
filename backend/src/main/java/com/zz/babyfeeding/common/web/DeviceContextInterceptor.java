@@ -37,10 +37,10 @@ public class DeviceContextInterceptor implements HandlerInterceptor {
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
             return true;
         }
-        // Same normalization as the rate limiter: ";matrix" content must not
-        // turn the public init/health/CSV endpoints into device-protected ones
-        // (N-7).
-        String path = RequestPaths.withinApplication(request);
+        // Same route-based scope as the rate limiter: ";matrix" and "?query"
+        // must not turn the public init/health/CSV endpoints into
+        // device-protected ones, nor the reverse (N-7 / Q-26).
+        String path = RequestPaths.scopePath(request);
         if (isExempt(path, request.getMethod())) {
             return true;
         }

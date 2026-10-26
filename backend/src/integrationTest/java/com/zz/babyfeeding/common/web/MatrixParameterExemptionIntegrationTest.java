@@ -58,4 +58,15 @@ class MatrixParameterExemptionIntegrationTest extends IntegrationTestBase {
         assertThat(result.getResponse().getStatus()).isEqualTo(404);
         assertThat(body(result).path("code").asText()).isEqualTo("NOT_FOUND");
     }
+
+    @Test
+    void pathVariantsDoNotExemptProtectedEndpointsFromTheDeviceHeader() throws Exception {
+        for (String path : new String[]{"/api/v1/babies;x=1", "/api/v1/babies?x=1"}) {
+            MvcResult result = getJson(path, null);
+            assertThat(result.getResponse().getStatus()).isEqualTo(400);
+            assertThat(body(result).path("code").asText())
+                    .as("%s must still require X-Device-Id", path)
+                    .isEqualTo("DEVICE_ID_REQUIRED");
+        }
+    }
 }
